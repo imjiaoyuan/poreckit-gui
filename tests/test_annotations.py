@@ -3,9 +3,9 @@ import time
 
 import pytest
 
-from poreckit_gui.annotations import AnnotationModel, read_bedpe, write_bedpe, feature_payload
-from poreckit_gui.model import Region
+from poreckit_gui.annotations import AnnotationModel, feature_payload, read_bedpe, write_bedpe
 from poreckit_gui.demo import create_demo
+from poreckit_gui.model import Region
 
 
 def test_annotation_roundtrip_edits_and_mirrored_hits(tmp_path):
@@ -32,7 +32,7 @@ def test_annotation_roundtrip_edits_and_mirrored_hits(tmp_path):
     export = tmp_path / "saved.bedpe"
     write_bedpe(export, model.layer(key))
     restored = read_bedpe(export)[0]
-    assert restored["extra"] == ["7", "+", "-"]
+    assert restored["score"] == "7" and restored["extra"] == ["+", "-"]
     assert restored["x0"] == 120
     model.remove_layer(key)
     model.undo()
@@ -40,9 +40,10 @@ def test_annotation_roundtrip_edits_and_mirrored_hits(tmp_path):
 
 
 def test_gui_annotation_gestures_and_bookmark_roundtrip(tmp_path, monkeypatch):
-    from PySide6.QtWidgets import QApplication, QFileDialog, QInputDialog
-    from PySide6.QtCore import Qt, QPoint
+    from PySide6.QtCore import QPoint, Qt
     from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication, QFileDialog, QInputDialog
+
     from poreckit_gui.app import Browser
     app = QApplication.instance() or QApplication([])
     browser = Browser()
@@ -104,10 +105,13 @@ def test_gui_annotation_gestures_and_bookmark_roundtrip(tmp_path, monkeypatch):
         browser.bookmarks.add()
         browser.bookmarks.play.setChecked(True)
         wait()
+        assert browser.current_viewport().x.end == 1000000
         browser.bookmarks.advance()
         wait()
+        # No wraparound: advancing past the last bookmark stops the slideshow.
+        assert not browser.bookmarks.play.isChecked()
         browser.bookmarks.play.setChecked(False)
-        assert browser.current_viewport().x.end == 2000000
+        assert browser.current_viewport().x.end == 1000000
         browser.bookmarks.list.setCurrentRow(0)
         browser.bookmarks.open_current()
         wait()

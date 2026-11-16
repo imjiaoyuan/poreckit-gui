@@ -2,32 +2,73 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import sys
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 from PySide6.QtCore import QLocale, QProcess, QProcessEnvironment, QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QComboBox, QLineEdit, QCheckBox, QFormLayout,
-    QListWidget, QListWidgetItem, QAbstractItemView, QSplitter, QToolBar,
-    QFileDialog, QMessageBox, QDockWidget, QPlainTextEdit, QProgressBar,
-    QGroupBox, QStackedWidget, QTabWidget, QDoubleSpinBox, QScrollArea, QSizePolicy,
+    QAbstractItemView,
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QDockWidget,
+    QDoubleSpinBox,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMainWindow,
+    QMessageBox,
+    QPlainTextEdit,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSplitter,
+    QStackedWidget,
+    QTabWidget,
+    QToolBar,
+    QVBoxLayout,
+    QWidget,
 )
 
-from .model import Region, validate_view
-from .widgets import ImageView, ChromosomeOverview
+from .contactview import CONTROL_MODES, DISPLAY_MODES, SIGNED_MODES
 from .jobs import JobProcess
+from .model import Region, validate_view
 from .viewport import Viewport
-from .contactview import DISPLAY_MODES, CONTROL_MODES, SIGNED_MODES
+from .widgets import ChromosomeOverview, ImageView
+
+if TYPE_CHECKING:
+    from .annotationui import AnnotationController
+    from .assemblyview import AssemblyEditor
+    from .genomeui import GenomeDialog
+    from .sequenceview import SequenceBrowser
+    from .states import StateController
+    from .workbench import PlotWorkbench
 
 TRACK_NAMES = {"contacts": "Contact map", "genes": "Genes", "signal": "Signal", "tads": "TAD", "loops": "Loops"}
 
 
 class Browser(QMainWindow):
+    # Widgets created in _build(); annotated non-Optional because every
+    # access below happens after construction completes.
+    plot_workbench: PlotWorkbench
+    sequence_browser: SequenceBrowser
+    assembly_editor: AssemblyEditor
+    annotations: AnnotationController
+    bookmarks: StateController
+    genome_dialog: GenomeDialog
+
     def __init__(self, settings=None):
         super().__init__()
         self.setWindowTitle("poreckit · Genome Browser")
@@ -43,7 +84,7 @@ class Browser(QMainWindow):
         self.pending_viewport = None
         self.pending_linked = False
         self.hovered_bin = None
-        self.annotations = None
+        self.annotations = None  # type: ignore[assignment]  # placeholder until _build() creates the controller
         self.history = []
         self.history_index = -1
         self.job = None
@@ -58,7 +99,7 @@ class Browser(QMainWindow):
         self.display_timer.setSingleShot(True)
         self.display_timer.setInterval(450)
         self.display_timer.timeout.connect(self.apply_display_changes)
-        self.plot_workbench = None
+        self.plot_workbench = None  # type: ignore[assignment]  # placeholder until _build() creates the real workbench
         self.process = JobProcess(self)
         self.process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
         self.process.readyReadStandardOutput.connect(self.read_log)
@@ -520,7 +561,7 @@ class Browser(QMainWindow):
         if self.tabs.currentWidget() is getattr(self, "sequence_browser", None):
             return self.sequence_browser.canvas
         if self.tabs.currentWidget() is self.plot_workbench:
-            return self.plot_workbench.image
+            return cast("PlotWorkbench", self.tabs.currentWidget()).image
         return self.image
 
     def find_gene(self):
@@ -580,12 +621,13 @@ class Browser(QMainWindow):
             except ValueError:
                 span = 2000000
             target = max(1, (span + 249) // 250)
-            resolution = next((r for r in available if r >= target), available[-1] if available else target)
+            picked = next((r for r in available if r >= target), available[-1] if available else target)
+            resolution = str(picked)
         try:
-            resolution = int(resolution)
+            bin_size = int(resolution)
         except ValueError:
             return
-        choices = ["raw"] + [name for name, levels in self.metadata.get("normalizations", {}).items() if resolution in levels]
+        choices = ["raw"] + [name for name, levels in self.metadata.get("normalizations", {}).items() if bin_size in levels]
         self.norm.blockSignals(True)
         self.norm.clear()
         self.norm.addItems(choices)
@@ -596,7 +638,7 @@ class Browser(QMainWindow):
     def open_file(self):
         if self.busy():
             return
-        path, _ = QFileDialog.getOpenFileName(self, "Load contact data", self.settings.value("last_folder", ""),
+        path, _ = QFileDialog.getOpenFileName(self, "Load contact data", str(self.settings.value("last_folder", "")),
             "Genomic data (*.cool *.mcool *.hic *.h5 *.pairs *.pairs.gz *.parquet *.bw *.bigwig *.bigWig *.bedgraph *.bg *.bam *.cram *.sam *.vcf *.vcf.gz *.bcf *.fa *.fasta *.bed *.gtf *.gff);;All files (*)",
             options=QFileDialog.Option.DontUseNativeDialog)
         if path:
@@ -614,9 +656,14 @@ class Browser(QMainWindow):
             self.tabs.setCurrentWidget(self.sequence_browser)
             self.sequence_browser.add_files([path])
             return
-        from .remote import is_remote
+        from .remote import is_remote, source_path
         if is_remote(path):
-            self.error("Open a local contact map or a supported remote genomic track")
+            if not source_path(path).lower().endswith(".hic"):
+                self.error("Open a local contact map or a supported remote genomic track")
+                return
+            self.tabs.setCurrentIndex(0)
+            self.start_job({"action": "inspect", "input": str(path)},
+                           "Reading chromosomes and resolutions…")
             return
         path = str(Path(path).resolve())
         self.tabs.setCurrentIndex(0)
@@ -628,8 +675,37 @@ class Browser(QMainWindow):
         self.sequence_browser.open_files()
 
     def open_remote_track(self):
-        self.tabs.setCurrentWidget(self.sequence_browser)
-        self.sequence_browser.open_url()
+        if self.busy():
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Open remote track")
+        layout = QVBoxLayout(dialog)
+        form = QFormLayout()
+        url = QLineEdit()
+        url.setPlaceholderText("https://…/sample.bw, .bam, .vcf.gz, .fa or .hic")
+        index = QLineEdit()
+        index.setPlaceholderText("Optional custom BAI/CSI/TBI URL")
+        form.addRow("Data URL", url)
+        form.addRow("Index URL", index)
+        layout.addLayout(form)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Open | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        dialog.resize(600, 150)
+        if not dialog.exec():
+            return
+        source = url.text().strip()
+        side = index.text().strip()
+        from .remote import is_remote, source_path
+        if not is_remote(source) or side and not is_remote(side):
+            self.error("Enter HTTP or HTTPS URLs")
+            return
+        if source_path(source).lower().endswith(".hic"):
+            self.load_file(source)
+        else:
+            self.tabs.setCurrentWidget(self.sequence_browser)
+            self.sequence_browser.add_files([source], indexes={source: side} if side else {})
 
     def open_demo(self):
         if self.busy():
@@ -794,7 +870,7 @@ class Browser(QMainWindow):
             state = self.history[index]
             self.navigate_viewport(state if isinstance(state, Viewport) else Viewport(state, state), remember=False)
 
-    def render(self, checked=False, *, remember=True, output=None, linked=False):
+    def render(self, checked=False, *, remember=True, output=None, linked=False):  # type: ignore[override]  # custom render pipeline, not QWidget.render(painter, ...)
         if self.busy():
             return
         self.display_timer.stop()
@@ -945,7 +1021,7 @@ class Browser(QMainWindow):
                 except OSError:
                     pass
 
-    def loaded(self, result):
+    def loaded(self, result: dict):
         self.display_timer.stop()
         self.pending_display_update = False
         self.loading_controls = True
@@ -990,8 +1066,9 @@ class Browser(QMainWindow):
         # The session was fully validated by validate_session() before the
         # file load; still guarantee the flag never stays stuck on a failure.
         try:
-            if has_session:
-                session, self.pending_session = self.pending_session, None
+            if self.pending_session is not None:
+                session = self.pending_session
+                self.pending_session = None
                 self.gene_search.paths = list(session.get("gene_annotations", []))
                 if "bookmarks" in session:
                     self.bookmarks.restore(session["bookmarks"])
@@ -1153,8 +1230,8 @@ class Browser(QMainWindow):
                 return
             if not Path(path).suffix:
                 path += ".json"
-            from .states import relative_references
             from .sessionio import save_json
+            from .states import relative_references
             view = relative_references(view, Path(path).parent)
             save_json(path, view)
             if self.annotations:
@@ -1181,8 +1258,8 @@ class Browser(QMainWindow):
         if not path:
             return
         try:
-            from .states import absolute_references
             from .sessionio import load_json
+            from .states import absolute_references
             data = absolute_references(load_json(path), Path(path).parent)
             self.apply_session(data)
         except (ValueError, OSError, KeyError, TypeError, AttributeError) as exc:
@@ -1246,7 +1323,8 @@ class Browser(QMainWindow):
         self.bookmarks.timer.stop()
         self.process.shutdown()
         self.settings.setValue("geometry", self.saveGeometry())
-        from .sessionio import cleanup_temp; cleanup_temp(self.temp.name)
+        from .sessionio import cleanup_temp
+        cleanup_temp(self.temp.name)
         self.windows.close()
         event.accept()
 
@@ -1258,7 +1336,8 @@ def main():
         from .selftest import run
         raise SystemExit(run(sys.argv[2]))
     if sys.argv[1:2] == ["--worker"]:
-        from .worker import main as worker_main, serve
+        from .worker import main as worker_main
+        from .worker import serve
         if sys.argv[2:] == ["--serve"]:
             serve()
             return

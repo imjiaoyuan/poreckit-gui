@@ -108,7 +108,6 @@ def cleanup_temp(directory):
     than crashing at shutdown."""
     import shutil
     import time
-    from pathlib import Path
     for delay in (0, .5, 1, 2, 4):
         if delay:
             time.sleep(delay)

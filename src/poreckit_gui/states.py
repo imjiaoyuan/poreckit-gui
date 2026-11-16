@@ -6,8 +6,20 @@ import uuid
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QTimer
-from PySide6.QtWidgets import (QDockWidget, QWidget, QVBoxLayout, QHBoxLayout,
-    QListWidget, QListWidgetItem, QPushButton, QInputDialog, QFileDialog, QSpinBox, QLabel)
+from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtWidgets import (
+    QDockWidget,
+    QFileDialog,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QPushButton,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 def file_references(state, transform):
@@ -73,12 +85,20 @@ class StateController(QObject):
         self.play.setCheckable(True)
         self.play.toggled.connect(self.play_changed)
         row.addWidget(self.play)
+        self.next = QPushButton("Next")
+        self.next.clicked.connect(self.advance)
+        row.addWidget(self.next)
         row.addWidget(QLabel("Seconds"))
         self.interval = QSpinBox()
         self.interval.setRange(1, 3600)
         self.interval.setValue(5)
         self.interval.valueChanged.connect(lambda seconds: self.timer.setInterval(seconds*1000))
         row.addWidget(self.interval)
+        self.indicator = QLabel("")
+        self.indicator.hide()
+        layout.addWidget(self.indicator)
+        self.escape = QShortcut(QKeySequence("Esc"), panel)
+        self.escape.activated.connect(lambda: self.play.setChecked(False))
         layout.addLayout(row)
         self.dock.setWidget(panel)
         browser.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock)
@@ -86,6 +106,32 @@ class StateController(QObject):
         menu.addAction(self.dock.toggleViewAction())
         browser.action(menu, "Import bookmarks…", self.load)
         browser.action(menu, "Export bookmarks…", self.export)
+        self.restore_settings()
+
+    @property
+    def settings_key(self):
+        return "bookmarks"
+
+    def restore_settings(self):
+        raw = self.browser.settings.value(self.settings_key)
+        if not raw:
+            return
+        try:
+            entries = json.loads(raw)
+            valid = []
+            if isinstance(entries, list):
+                for entry in entries:
+                    if (isinstance(entry, dict) and isinstance(entry.get("name"), str)
+                            and isinstance(entry.get("view"), dict)):
+                        valid.append(entry)
+            self.entries = valid
+            self.refresh()
+            self.mark_saved()
+        except (ValueError, TypeError):
+            pass
+
+    def persist(self):
+        self.browser.settings.setValue(self.settings_key, json.dumps(self.entries))
 
     @property
     def dirty(self):
@@ -102,6 +148,7 @@ class StateController(QObject):
         self.entries = copy.deepcopy(entries)
         self.refresh()
         self.mark_saved()
+        self.persist()
 
     def refresh(self, index=None):
         index = self.list.currentRow() if index is None else index
@@ -124,6 +171,7 @@ class StateController(QObject):
                                          view=self.browser.session_data()))
                 self.refresh(len(self.entries)-1)
                 self.dock.show()
+                self.persist()
             except (ValueError, OSError) as exc:
                 self.browser.error(exc)
 
@@ -133,6 +181,7 @@ class StateController(QObject):
             try:
                 self.entries[row]["view"] = self.browser.session_data()
                 self.refresh()
+                self.persist()
             except (ValueError, OSError) as exc:
                 self.browser.error(exc)
 
@@ -143,12 +192,14 @@ class StateController(QObject):
             if ok and name.strip():
                 self.entries[row]["name"] = name
                 self.refresh()
+                self.persist()
 
     def remove(self):
         row = self.list.currentRow()
         if row >= 0:
             del self.entries[row]
             self.refresh(row)
+            self.persist()
 
     def move(self, delta):
         row = self.list.currentRow()
@@ -156,6 +207,7 @@ class StateController(QObject):
         if row >= 0 and 0 <= target < len(self.entries):
             self.entries.insert(target, self.entries.pop(row))
             self.refresh(target)
+            self.persist()
 
     def open_current(self):
         row = self.list.currentRow()
@@ -174,15 +226,30 @@ class StateController(QObject):
         self.play.setText("Stop slideshow" if enabled else "Start slideshow")
         if enabled:
             self.open_current()
+            self.update_indicator()
             self.timer.start()
         else:
             self.timer.stop()
+            self.indicator.hide()
+
+    def update_indicator(self):
+        row = self.list.currentRow()
+        if self.play.isChecked() and 0 <= row < len(self.entries):
+            self.indicator.setText(f"{row+1}/{len(self.entries)} — {self.entries[row]['name']}")
+            self.indicator.show()
 
     def advance(self):
         if self.browser.busy() or not self.entries:
             return
-        self.list.setCurrentRow((self.list.currentRow()+1) % len(self.entries))
+        row = self.list.currentRow()+1
+        if row >= len(self.entries):
+            # No wraparound: the slideshow stops at the last bookmark.
+            self.play.setChecked(False)
+            self.browser.statusBar().showMessage("Slideshow finished")
+            return
+        self.list.setCurrentRow(row)
         self.open_current()
+        self.update_indicator()
 
     def export(self):
         path, _ = QFileDialog.getSaveFileName(self.browser, "Export bookmarks", "bookmarks.json", "JSON (*.json)",
@@ -204,10 +271,22 @@ class StateController(QObject):
                 if data.get("version") != 1:
                     raise ValueError("Unsupported bookmark version")
                 entries = data["bookmarks"]
+                valid, skipped = [], []
                 for entry in entries:
-                    self.browser.validate_session(entry["view"])
-                self.entries.extend(entries)
+                    try:
+                        if not isinstance(entry.get("name"), str) or not isinstance(entry.get("view"), dict):
+                            raise ValueError("Invalid bookmark")
+                        self.browser.validate_session(entry["view"])
+                        valid.append(entry)
+                    except (ValueError, OSError, KeyError, TypeError, AttributeError) as exc:
+                        # Skip bookmarks whose data files are missing or whose
+                        # view state is unusable; never abort the whole import.
+                        skipped.append(f'{entry.get("name", "Unnamed")}: {exc}')
+                self.entries.extend(valid)
                 self.refresh()
                 self.dock.show()
+                self.persist()
+                if skipped:
+                    self.browser.error("Some bookmarks were skipped:\n" + "\n".join(skipped))
             except (ValueError, OSError, KeyError, TypeError, AttributeError) as exc:
                 self.browser.error(exc)

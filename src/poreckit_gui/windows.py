@@ -1,7 +1,7 @@
 """Independent browser windows with optional genomic navigation linking."""
-from pathlib import Path
 import shutil
 import uuid
+from pathlib import Path
 
 from .model import Region
 from .viewport import Viewport
@@ -36,7 +36,7 @@ def translated_viewport(viewport, source, target):
 class WindowController:
     # Strong ownership keeps windows created by menu actions alive. Closing a
     # window unregisters it after the close event has actually been accepted.
-    instances = []
+    instances: list["WindowController"] = []
 
     def __init__(self, browser):
         self.browser = browser
@@ -118,9 +118,9 @@ class WindowController:
         try:
             target = translated_viewport(viewport, source.metadata, b.metadata)
             mode = b.map_display.currentData()
-            if not target.diagonal and mode in {"split", "split_oe", "oe_local", "pearson_local"}:
+            if not target.diagonal and mode in {"split", "split_oe", "oe_local", "pearson_local", "pearson", "compartment"}:
                 raise ValueError("This display requires identical X and Y regions")
-            from .contactview import EXPECTED_MODES, CONTROL_EXPECTED_MODES
+            from .contactview import CONTROL_EXPECTED_MODES, EXPECTED_MODES
             if target.x.chrom != target.y.chrom and mode in EXPECTED_MODES | CONTROL_EXPECTED_MODES:
                 raise ValueError("This display requires a single chromosome")
             text = b.resolution.currentText()

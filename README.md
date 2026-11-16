@@ -80,12 +80,26 @@ uv sync --reinstall-package poreckit
   Axis-side tracks share the matrix coordinates and keep signal values intact
   when rotated; the two orientations reuse the same underlying data query.
 - Load a second contact file with **File → Load control map…** to unlock split, difference and ratio views against it, including observed/expected modes that use each file's own expected curves.
+- The **Data** selector also offers whole-region summary views for square, single-region maps: **Pearson correlation** shows the per-distance-normalized correlation between bin contact profiles on a fixed −1 to +1 color range, and **Compartment (A/B)** colors same-compartment (A-A, B-B) contacts positive and cross-compartment (A-B) contacts negative, derived from the sign of the first principal component. Both require at least 50 bins in the window; bins without data are drawn as neutral.
 - **View → Whole-genome overview…** (`Ctrl+G`) aggregates contacts across the whole genome; click a chromosome pair to open it in the browser.
 - The **Window** menu opens additional browser windows, duplicates the current view, and can link loci across windows so navigation stays synchronized.
 - **File → Export matrix data…** saves the displayed square map as NPZ with the observed and displayed arrays, the optional control matrix and coordinate metadata.
 - Export PNG, PDF or SVG. Save/open JSON sessions to retain settings and
   references to data files. Relative paths resolve against the session file;
   data files are not copied. Demo data is temporary and is not session-persistent.
+- **Bookmarks** store complete view states (data files, locus, resolution,
+  normalization, display mode, tracks). Use **Bookmarks → Bookmark current view…**
+  (`Ctrl+B`) or the Bookmarks panel to add, update, rename, delete and reorder
+  bookmarks, and to jump to one with a double click or **Open**. The list is
+  kept between launches in the application settings; **Export/Import
+  bookmarks…** saves and loads it as JSON using the same session dialect
+  (version 1, relative paths resolved against the bookmark file, data
+  referenced — never copied). Bookmarks whose data files are missing are
+  skipped with a clear message instead of aborting the import.
+- **Slideshow**: **Start slideshow** in the Bookmarks panel jumps through the
+  bookmark list on a configurable interval (or step manually with **Next**).
+  An indicator shows the position (`2/7 — name`); it stops at the last
+  bookmark, and **Stop slideshow** or `Esc` exits at any time.
 - Try **File → Open synthetic demo** without external datasets. These counts are synthetic and have no biological meaning. **Open synthetic track demo** fills the Tracks / alignments tab with example files.
 
 The UI follows the desktop's Qt style, fonts and palette, without a custom
@@ -109,7 +123,7 @@ Files lacking chromosome lengths need an explicit locus.
 
 ## Tracks and assemblies
 
-**File → Open genomic tracks…** loads bigWig/bedGraph signals, BAM/CRAM/SAM alignments, FASTA references, VCF/BCF variants and GTF/GFF/BED files into the **Tracks / alignments** tab. The tab has its own locus field, per-track display options and track-session save/open. **File → Open remote track…** reads bigWig, BAM, VCF and FASTA directly over HTTP(S) with byte-range requests; an optional custom index URL (BAI/CSI/TBI) is supported.
+**File → Open genomic tracks…** loads bigWig/bedGraph signals, BAM/CRAM/SAM alignments, FASTA references, VCF/BCF variants and GTF/GFF/BED files into the **Tracks / alignments** tab. The tab has its own locus field, per-track display options and track-session save/open. **File → Open remote track…** reads bigWig, BAM, VCF, FASTA and `.hic` contact maps directly over HTTP(S) with byte-range requests; an optional custom index URL (BAI/CSI/TBI) is supported for track formats, while a `.hic` URL opens as a contact map with chromosome/resolution inspection and matrix queries served block by block through the same bounded cache.
 
 The **Assembly editor** tab starts from the loaded contact map or an imported `.assembly` text file. Scaffolds can be dragged, moved, cut, split, joined and inverted with undo/redo; positions lift automatically and the preview re-queries the source contacts for the edited layout, bounded so very large layouts must zoom to a smaller region first. Projects save and reopen with their source mapping. **Export** writes the edited layout as `.assembly` text, AGP, corrected FASTA, a corrected contact map (`.cool`) or a map image, and never overwrites the source contact file.
 

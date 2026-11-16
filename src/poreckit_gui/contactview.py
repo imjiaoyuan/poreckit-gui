@@ -1,16 +1,23 @@
 """Data-backed two-dimensional contact view and basic control comparisons."""
+from __future__ import annotations
+
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .model import Region
+
 
 import numpy as np
 from poreckit import rasterize
 from poreckit.tracks.base import BaseTrack
-
 
 DISPLAY_MODES = {
     "observed": "Observed", "control": "Control", "split": "Observed / control split",
     "difference": "Observed − control", "ratio": "(Observed + p) / (Control + p)",
     "log2ratio": "log2((Observed + p) / (Control + p))",
     "oe_local": "Observed / expected (visible region)", "pearson_local": "Pearson (visible region)",
+    "pearson": "Pearson correlation", "compartment": "Compartment (A/B)",
     "expected": "Expected (file)", "oe": "Observed / expected (file)",
     "log2oe": "log2(Observed / expected) (file)",
     "oe_p": "(Observed + p) / (Expected + p) (file)",
@@ -23,7 +30,10 @@ DISPLAY_MODES = {
 EXPECTED_MODES = {"expected", "oe", "log2oe", "oe_p", "residual", "split_oe", "difference_oe", "ratio_oe"}
 CONTROL_EXPECTED_MODES = {"control_expected", "control_oe", "split_oe", "difference_oe", "ratio_oe"}
 CONTROL_MODES = {"control", "split", "difference", "ratio", "log2ratio"} | CONTROL_EXPECTED_MODES
-SIGNED_MODES = {"difference", "log2ratio", "pearson_local", "log2oe", "residual", "difference_oe"}
+SIGNED_MODES = {"difference", "log2ratio", "pearson_local", "pearson", "compartment",
+                "log2oe", "residual", "difference_oe"}
+# Whole-region summary modes: square diagonal view only, computed in matrixmodes.
+REGION_MODES = {"pearson", "compartment"}
 
 
 def transform_matrix(observed, control, mode, pseudocount=1, expected=None, control_expected=None):
@@ -72,6 +82,9 @@ def transform_matrix(observed, control, mode, pseudocount=1, expected=None, cont
             return oe
         with np.errstate(invalid="ignore", divide="ignore"):
             return np.corrcoef(oe).astype(np.float32)
+    if mode in REGION_MODES:
+        from .matrixmodes import compartment_matrix, pearson_matrix
+        return pearson_matrix(a) if mode == "pearson" else compartment_matrix(a)
     if control is None:
         raise ValueError("Load a control map for the selected display")
     b = np.asarray(control, dtype=np.float32)
@@ -99,8 +112,8 @@ def transform_matrix(observed, control, mode, pseudocount=1, expected=None, cont
 
 @dataclass
 class ContactPanel(BaseTrack):
-    x: object = None
-    y: object = None
+    x: Region | None = None
+    y: Region | None = None
     matrix: object = None
     cmap: str = "hic_whitered"
     log: bool = False
@@ -114,9 +127,11 @@ class ContactPanel(BaseTrack):
     matrix_y_start: int | None = None
 
     def region_tuple(self):
+        assert self.x is not None  # regions are set before any draw
         return self.x.chrom, self.x.start, self.x.end
 
     def draw(self, ax, *args):
+        assert self.x is not None and self.y is not None  # regions are set before any draw
         import matplotlib.pyplot as plt
         from matplotlib.ticker import FuncFormatter
         data = np.asarray(self.matrix, dtype=np.float32)
@@ -124,11 +139,17 @@ class ContactPanel(BaseTrack):
         if self.x == self.y and data.shape[0] == data.shape[1] and not self.signed:
             positive = data[np.triu_indices_from(data, k=1)]
             positive = positive[np.isfinite(positive) & (positive > 0)]
+        upper: float | None
         if self.signed:
-            finite = np.abs(data[np.isfinite(data)])
-            upper = self.vmax or (float(np.percentile(finite, self.percentile or 100)) if finite.size else 1)
-            upper = max(upper, 1e-12)
-            lower = -upper
+            if self.display in REGION_MODES:
+                # Correlation and compartment values live on a fixed [-1, 1]
+                # scale, so percentile saturation would misread them.
+                lower, upper = -1.0, 1.0
+            else:
+                finite = np.abs(data[np.isfinite(data)])
+                upper = self.vmax or (float(np.percentile(finite, self.percentile or 100)) if finite.size else 1)
+                upper = max(upper, 1e-12)
+                lower = -upper
         else:
             upper = self.vmax
             if upper is None and self.percentile is not None:
@@ -157,7 +178,9 @@ class ContactPanel(BaseTrack):
             ax.grid(alpha=.25, linewidth=.4)
         cax = ax.inset_axes([1.025, .45, .018, .45])
         bar = ax.figure.colorbar(im, cax=cax)
-        unit = "contact" if self.display in {"observed", "control", "split"} else self.display.replace("_local", " (region)")
+        unit = {"pearson": "Pearson r", "compartment": "compartment (+ same, − cross)"}.get(
+            self.display, "contact" if self.display in {"observed", "control", "split"}
+            else self.display.replace("_local", " (region)"))
         bar.set_label(("signed log1p " if self.log and self.signed else "log1p " if self.log else "") + unit, fontsize=8)
         bar.ax.tick_params(labelsize=7)
         bar.outline.set_visible(False)

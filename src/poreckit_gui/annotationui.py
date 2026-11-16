@@ -3,9 +3,29 @@ import json
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
-    QTableWidget, QTableWidgetItem, QLineEdit, QPushButton, QDockWidget, QFileDialog,
-    QInputDialog, QColorDialog, QLabel, QCheckBox, QToolButton)
+from PySide6.QtGui import QColor, QKeySequence, QShortcut
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QCheckBox,
+    QColorDialog,
+    QDialog,
+    QDialogButtonBox,
+    QDockWidget,
+    QFileDialog,
+    QFormLayout,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from .annotations import AnnotationModel, read_bedpe, write_bedpe
 
@@ -42,17 +62,21 @@ class AnnotationController(QObject):
         self.mirror.toggled.connect(self.mirror_changed)
         row.addWidget(self.mirror)
         layout.addLayout(row)
-        self.table = QTableWidget(0, 7)
-        self.columns = ("xchrom", "x0", "x1", "ychrom", "y0", "y1", "name")
-        self.table.setHorizontalHeaderLabels(["X chr", "X start", "X end", "Y chr", "Y start", "Y end", "Name"])
+        self.table = QTableWidget(0, 8)
+        self.columns = ("xchrom", "x0", "x1", "ychrom", "y0", "y1", "name", "score")
+        self.table.setHorizontalHeaderLabels(["X chr", "X start", "X end", "Y chr", "Y start", "Y end", "Name", "Score"])
         self.table.itemChanged.connect(self.cell_changed)
         self.table.itemDoubleClicked.connect(self.centre_feature)
         layout.addWidget(self.table)
         row = QHBoxLayout()
-        for text, callback in [("Delete selected", self.delete_selected), ("Undo", self.model.undo), ("Redo", self.model.redo)]:
+        for text, callback in [("Edit…", self.edit_selected_dialog), ("Delete selected", self.delete_selected),
+                               ("Undo", self.model.undo), ("Redo", self.model.redo)]:
             button = QPushButton(text)
             button.clicked.connect(callback)
             row.addWidget(button)
+        delete_key = QShortcut(QKeySequence.StandardKey.Delete, self.table)
+        delete_key.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        delete_key.activated.connect(self.delete_key_pressed)
         self.status = QLabel("Draw on the matrix to add an annotation")
         row.addWidget(self.status, 1)
         layout.addLayout(row)
@@ -169,6 +193,30 @@ class AnnotationController(QObject):
             for key in ids:
                 self.model.remove(layer["id"], key)
 
+    def delete_key_pressed(self):
+        if self.table.state() != QAbstractItemView.State.EditingState:
+            self.delete_selected()
+
+    def selected_feature(self):
+        layer = self.current()
+        items = self.table.selectedItems()
+        if not layer or not items:
+            return layer, None
+        key = items[0].data(Qt.ItemDataRole.UserRole)
+        return layer, next((v for v in layer["features"] if v["id"] == key), None)
+
+    def edit_selected_dialog(self):
+        layer, value = self.selected_feature()
+        if layer is None or value is None:
+            return
+        dialog = FeatureDialog(self.browser, layer, value)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            self.model.update(layer["id"], value["id"], **dialog.values())
+        except ValueError as exc:
+            self.browser.error(exc)
+
     def color(self):
         if not self.current():
             return
@@ -262,8 +310,8 @@ class AnnotationController(QObject):
         layer = self.current()
         if layer:
             value = next(v for v in layer["features"] if v["id"] == item.data(Qt.ItemDataRole.UserRole))
-            from .viewport import Viewport
             from .model import Region
+            from .viewport import Viewport
             self.browser.navigate_viewport(Viewport(Region(value["xchrom"], value["x0"], value["x1"]),
                                                      Region(value["ychrom"], value["y0"], value["y1"])))
 
@@ -276,3 +324,49 @@ class AnnotationController(QObject):
             self.snapshot_revision = self.model.revision
             self.snapshot_path = str(path)
         return {"layers_file": self.snapshot_path}
+
+
+class FeatureDialog(QDialog):
+    """Edit the coordinates and attributes of one loop/TAD annotation."""
+
+    def __init__(self, parent, layer, value):
+        super().__init__(parent)
+        self.setWindowTitle("Edit annotation")
+        self.feature = value
+        form = QFormLayout(self)
+        self.name = QLineEdit(str(value.get("name", "")))
+        self.score = QLineEdit(str(value.get("score", "")))
+        self.x0 = QLineEdit(str(value["x0"]))
+        self.x1 = QLineEdit(str(value["x1"]))
+        self.y0 = QLineEdit(str(value["y0"]))
+        self.y1 = QLineEdit(str(value["y1"]))
+        form.addRow("Name", self.name)
+        form.addRow("Score", self.score)
+        form.addRow(f"{value['xchrom']} start", self.x0)
+        form.addRow(f"{value['xchrom']} end", self.x1)
+        form.addRow(f"{value['ychrom']} start", self.y0)
+        form.addRow(f"{value['ychrom']} end", self.y1)
+        color_row = QHBoxLayout()
+        label = QLabel(value.get("color") or layer["color"])
+        def pick():
+            chosen = QColorDialog.getColor(parent=self, initial=QColor(label.text()),
+                                           options=QColorDialog.ColorDialogOption.DontUseNativeDialog)
+            if chosen.isValid():
+                label.setText(chosen.name())
+        choose = QPushButton("Color…")
+        choose.clicked.connect(pick)
+        color_row.addWidget(choose)
+        color_row.addWidget(label)
+        color_row.addStretch(1)
+        form.addRow("Color", color_row)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        form.addRow(buttons)
+        self.color_label = label
+
+    def values(self):
+        parsed = QColor(self.color_label.text())
+        return dict(name=self.name.text(), score=self.score.text(),
+                    x0=self.x0.text(), x1=self.x1.text(), y0=self.y0.text(), y1=self.y1.text(),
+                    color=parsed.name() if parsed.isValid() else "")
