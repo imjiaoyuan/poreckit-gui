@@ -1,6 +1,7 @@
 """Reusable subprocess transport with one cancellable request at a time."""
 import json
 import signal
+import sys
 
 from PySide6.QtCore import QObject, QProcess, Signal
 
@@ -47,12 +48,10 @@ class JobProcess(QObject):
     def _prepare_group(self):
         """Run the worker as its own process-group leader so cancelling also
         stops the external tools (samtools/bcftools) the worker starts."""
-        import os
-        if hasattr(self.child, "setChildProcessModifier"):
-            try:
-                self.child.setChildProcessModifier(os.setsid)
-            except (RuntimeError, OSError):
-                pass
+        if sys.platform != "win32":
+            # Keep Python out of the fork/exec interval: Qt may fork while
+            # another thread owns the GIL, which can deadlock a Python callback.
+            self.child.setUnixProcessParameters(QProcess.UnixProcessFlag.CreateNewSession)
 
     def send(self):
         if self.request is not None:
@@ -106,9 +105,10 @@ class JobProcess(QObject):
 
     def _signal_group(self, sig):
         """Signal the worker's whole process group; False when unavailable.
-        Refuses to signal our own group in case the worker did not get its
-        own (child modifier unavailable)."""
+        Refuses to signal our own group if the worker did not get its own."""
         import os
+        if sys.platform == "win32":
+            return False
         pid = self.child.processId()
         if pid <= 0 or os.name != "posix" or not hasattr(os, "killpg"):
             return False
@@ -123,7 +123,7 @@ class JobProcess(QObject):
 
     def _terminate(self, graceful):
         from PySide6.QtCore import QTimer
-        if self._signal_group(signal.SIGTERM if graceful else signal.SIGKILL):
+        if sys.platform != "win32" and self._signal_group(signal.SIGTERM if graceful else signal.SIGKILL):
             if graceful:
                 # External tools get the worker's finally blocks via SIGTERM;
                 # escalate to SIGKILL if it does not finish in time.

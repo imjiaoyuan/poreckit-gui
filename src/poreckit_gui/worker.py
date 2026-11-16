@@ -437,7 +437,7 @@ def _own_process_group():
     """Become a session leader so the GUI can signal the whole worker process
     tree (including samtools/bcftools children) on cancel."""
     import os
-    if os.name == "posix":
+    if sys.platform != "win32":
         try:
             os.setsid()
         except OSError:

@@ -85,7 +85,7 @@ jobs:
         run: |
           args=()
           if [[ "$RUNNER_OS" != "macOS" ]]; then args+=(-n auto); fi
-          uv run --no-sync pytest -q "${args[@]}" --timeout=300
+          uv run --no-sync pytest -q -v "${args[@]}" --timeout=300 --timeout-method=thread
       - name: Lint and type-check
         shell: bash
         run: |
@@ -217,7 +217,7 @@ jobs:
             runuser -u builder -- uv run --no-sync python scripts/check_release_tag.py "$GITHUB_REF_NAME"
           fi
       - name: Test source application
-        run: runuser -u builder -- uv run --no-sync pytest -q -n auto --timeout=300
+        run: runuser -u builder -- uv run --no-sync pytest -q -v -n auto --timeout=300 --timeout-method=thread
       - name: Freeze and create the native pacman package
         run: runuser -u builder -- uv run --no-sync python scripts/build_release.py --format arch
       - name: Install and test the Arch package

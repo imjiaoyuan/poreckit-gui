@@ -386,7 +386,10 @@ def test_cancelling_worker_terminates_external_tools(tmp_path):
     script=tmp_path/'worker_tool.py'
     script.write_text(textwrap.dedent('''
         import os, signal, subprocess, sys, time
-        os.setsid()
+        try:
+            os.setsid()
+        except OSError:
+            pass  # Qt already created the worker session before exec.
         child=subprocess.Popen(["sleep","30"],start_new_session=True)
         open(sys.argv[1],"w").write(f"{child.pid} {os.getpgrp()}")
         signal.signal(signal.SIGTERM,lambda signum,frame:(_ for _ in ()).throw(SystemExit(0)))
@@ -412,6 +415,7 @@ def test_cancelling_worker_terminates_external_tools(tmp_path):
             time.sleep(.01)
         tool_pid,worker_group=pidfile.read_text().split()
         _worker_pid=process.processId()
+        assert int(worker_group)==_worker_pid,'worker is not its own process-group leader'
         assert int(worker_group)!=os.getpgrp(),'worker did not get its own process group'
         process.kill()
         deadline=time.monotonic()+15
