@@ -1,6 +1,4 @@
 """Regression tests for the shared session persistence helpers."""
-import json
-from pathlib import Path
 
 import pytest
 
@@ -76,10 +74,11 @@ def test_failing_serialization_keeps_previous_session(tmp_path, monkeypatch):
 
 def test_sequence_view_save_reports_error_and_keeps_old_file(tmp_path, monkeypatch):
     from PySide6.QtWidgets import QApplication, QFileDialog
+
     from poreckit_gui import sessionio
     from poreckit_gui.app import Browser
 
-    app = QApplication.instance() or QApplication([])
+    _app = QApplication.instance() or QApplication([])
     browser = Browser()
     seq = browser.sequence_browser
     try:

@@ -9,7 +9,7 @@ from .remote import open_binary
 
 
 def query_bigwig(path, chrom, start, end, bins):
-    from .sequenceio import exact, bigwig_chromsizes, version, chromosome
+    from .sequenceio import bigwig_chromsizes, chromosome, exact, version
     chrom = chromosome(dict(bigwig_chromsizes(version(path))), chrom)
     with open_binary(path) as source:
         head = exact(source, 64)

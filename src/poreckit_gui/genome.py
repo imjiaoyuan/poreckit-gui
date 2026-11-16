@@ -104,6 +104,7 @@ def genome_data(path, chromsizes, resolutions, resolution=None, state=None):
                 raise ValueError("Overview resolution must be a multiple of a stored resolution")
             return cooler_overview(path, resolution, layout, max(choices))
         from poreckit import make_reader
+
         from .model import Region
         rd = state.reader(path) if state else make_reader(path)
         try:
@@ -140,6 +141,7 @@ def draw_genome(matrix, layout, resolution, output, cmap="hic_whitered", log=Fal
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from poreckit.layout.style import register_hic_colormaps
+
     from .mapdata import save_map_data, svg_plot_bounds
     from .model import Region
     register_hic_colormaps()
@@ -149,7 +151,7 @@ def draw_genome(matrix, layout, resolution, output, cmap="hic_whitered", log=Fal
         finite = matrix[np.isfinite(matrix) & (matrix > 0)]
         vmax = float(np.percentile(finite, 99)) if finite.size else 1
         shown = np.log1p(matrix) if log else matrix
-        im = ax.imshow(np.ma.masked_invalid(shown), origin="upper", extent=[0, n, n, 0], interpolation="nearest",
+        im = ax.imshow(np.ma.masked_invalid(shown), origin="upper", extent=(0, n, n, 0), interpolation="nearest",
                        cmap=plt.get_cmap(cmap).with_extremes(bad="#e5e5e5"), vmin=0, vmax=np.log1p(vmax) if log else vmax)
         ticks = [c["offset"]+c["count"]/2 for c in layout]
         labels = [c["name"] for c in layout]

@@ -5,7 +5,7 @@ import h5py
 import numpy as np
 import pytest
 
-from poreckit_gui.assembly import Assembly,assembly_matrix,export_assembly,export_cool,render_assembly
+from poreckit_gui.assembly import Assembly, assembly_matrix, export_assembly, export_cool, render_assembly
 from poreckit_gui.demo import create_demo
 from poreckit_gui.model import Region
 from poreckit_gui.sequenceio import reference_sequence
@@ -116,7 +116,9 @@ def test_corrected_cooler_partial_scaffold_bins(tmp_path):
 
 def test_assembly_editor_edits_live_map_and_restores_project(tmp_path,monkeypatch):
     import time
-    from PySide6.QtWidgets import QApplication,QFileDialog,QMessageBox
+
+    from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
+
     from poreckit_gui.app import Browser
     app=QApplication.instance() or QApplication([])
     b=Browser()
@@ -183,9 +185,11 @@ def test_coarse_sparse_assembly_preserves_contact_pairs(tmp_path):
 
 def test_save_project_refuses_temporary_source_and_keeps_dirty_state(tmp_path,monkeypatch):
     import tempfile
-    from PySide6.QtWidgets import QApplication,QFileDialog
+
+    from PySide6.QtWidgets import QApplication, QFileDialog
+
     from poreckit_gui.assemblyview import AssemblyEditor
-    app=QApplication.instance() or QApplication([])
+    _app=QApplication.instance() or QApplication([])
     class StubBrowser:
         def __init__(self):
             self.temp=tempfile.TemporaryDirectory(prefix='poreckit-stub-browser-')

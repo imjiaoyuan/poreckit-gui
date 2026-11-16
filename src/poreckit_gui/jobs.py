@@ -59,7 +59,8 @@ class JobProcess(QObject):
             self.child.write((json.dumps(self.request) + "\n").encode("utf-8"))
 
     def read(self):
-        self.buffer.extend(bytes(self.child.readAllStandardOutput()))
+        # bytes(QByteArray) is valid at runtime but missing from the PySide6 stubs.
+        self.buffer.extend(bytes(self.child.readAllStandardOutput()))  # type: ignore[call-overload]
         while b"\n" in self.buffer:
             line, _, rest = self.buffer.partition(b"\n")
             self.buffer = bytearray(rest)

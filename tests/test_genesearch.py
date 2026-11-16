@@ -44,6 +44,7 @@ def test_gff_and_bed_search_and_result_limits(tmp_path):
 
 def test_gene_search_gui_axis_selection_and_session_sources(tmp_path, monkeypatch):
     from PySide6.QtWidgets import QApplication, QFileDialog
+
     from poreckit_gui.app import Browser
     app = QApplication.instance() or QApplication([])
     b = Browser()

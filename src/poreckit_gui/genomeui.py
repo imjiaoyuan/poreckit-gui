@@ -1,23 +1,27 @@
 """Whole-genome overview window and navigation into chromosome pairs."""
-from pathlib import Path
 import shutil
+from pathlib import Path
 
-from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QComboBox, QCheckBox, QFileDialog)
+from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QFileDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
-from .widgets import ImageView
 from .model import Region
 from .viewport import Viewport
+from .widgets import ImageView
 
 
 class GenomeDialog(QDialog):
+    # Named to avoid clashing with QDialog.result(); holds the last
+    # whole-genome job payload.
+    overview: dict | None
+    image: ImageView
+
     def __init__(self, browser):
         super().__init__(browser)
         self.browser = browser
         self.setWindowTitle("Whole-genome overview")
         self.resize(920, 850)
         self.setMinimumSize(650, 500)
-        self.result = None
+        self.overview = None
         self.source = ""
         self.source_version = None
         layout = QVBoxLayout(self)
@@ -55,8 +59,8 @@ class GenomeDialog(QDialog):
         self.raise_()
         stat = Path(self.browser.input_path).stat()
         version = stat.st_mtime_ns, stat.st_size, stat.st_ino
-        if self.source != self.browser.input_path or self.source_version != version or self.result is None:
-            self.result = None
+        if self.source != self.browser.input_path or self.source_version != version or self.overview is None:
+            self.overview = None
             self.image.clear_image()
             self.resolution.clear()
             self.resolution.addItems(["auto", *map(str, self.browser.metadata.get("resolutions", []))])
@@ -78,7 +82,7 @@ class GenomeDialog(QDialog):
             b.error(exc)
 
     def ready(self, result, job):
-        self.result, self.source = result, job["input"]
+        self.overview, self.source = result, job["input"]
         stat = Path(self.source).stat()
         self.source_version = stat.st_mtime_ns, stat.st_size, stat.st_ino
         self.image.show_image(result["output"])
@@ -107,7 +111,7 @@ class GenomeDialog(QDialog):
 
     def export(self):
         b = self.browser
-        if b.busy() or self.result is None:
+        if b.busy() or self.overview is None:
             return
         path, selected = QFileDialog.getSaveFileName(self, "Export overview figure", "genome.svg",
             "SVG (*.svg);;PNG (*.png);;PDF (*.pdf)", options=QFileDialog.Option.DontUseNativeDialog)
@@ -117,17 +121,17 @@ class GenomeDialog(QDialog):
             path += ".png" if "PNG" in selected else ".pdf" if "PDF" in selected else ".svg"
         try:
             if Path(path).suffix.lower() == ".svg":
-                shutil.copyfile(self.result["output"], path)
+                shutil.copyfile(self.overview["output"], path)
             elif Path(path).suffix.lower() in {".png", ".pdf"}:
                 b.start_job(dict(action="genome_export", input=self.source, output=path,
-                                 result=self.result, export=True), "Exporting whole-genome overview…")
+                                 result=self.overview, export=True), "Exporting whole-genome overview…")
             else:
                 raise ValueError("Select SVG, PNG or PDF")
         except (ValueError, OSError) as exc:
             b.error(exc)
 
     def export_matrix(self):
-        if self.result is None:
+        if self.overview is None:
             return
         path, _ = QFileDialog.getSaveFileName(self, "Export genome matrix and bin coordinates", "genome.npz", "NumPy (*.npz)",
                                              options=QFileDialog.Option.DontUseNativeDialog)
@@ -135,8 +139,9 @@ class GenomeDialog(QDialog):
             try:
                 import numpy as np
                 data = self.image.map_data
-                layout = self.result["chromosomes"]
-                resolution = self.result["binsize"]
+                assert data is not None  # the overview render always attaches map data
+                layout = self.overview["chromosomes"]
+                resolution = self.overview["binsize"]
                 chroms, starts, ends = [], [], []
                 for c in layout:
                     for i in range(c["count"]):

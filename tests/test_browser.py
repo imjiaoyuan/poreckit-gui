@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from poreckit_gui.model import Region, validate_view
 from poreckit_gui.demo import create_demo
+from poreckit_gui.model import Region, validate_view
 from poreckit_gui.worker import inspect_file, render
 
 
@@ -58,6 +58,7 @@ def test_render_real_core_with_tracks_and_vector_export(view, tmp_path):
 
 def test_gui_worker_navigation_and_failed_load_preserves_view(view, tmp_path, monkeypatch):
     from PySide6.QtWidgets import QApplication, QFileDialog
+
     from poreckit_gui.app import Browser
 
     app = QApplication.instance() or QApplication([])
@@ -129,6 +130,7 @@ def test_gui_worker_navigation_and_failed_load_preserves_view(view, tmp_path, mo
 
 def test_signal_panel_preserves_source_scale_and_negative_values(tmp_path):
     import matplotlib.pyplot as plt
+
     from poreckit_gui.tracks import SignalPanel
 
     path = tmp_path / "signal.bg"
@@ -187,6 +189,7 @@ def test_square_map_geometry_palette_limits_and_raw_values(view, tmp_path, monke
 
 def test_display_settings_auto_apply_and_manual_update(view):
     from PySide6.QtWidgets import QApplication
+
     from poreckit_gui.app import Browser
     app = QApplication.instance() or QApplication([])
     browser = Browser()
@@ -232,6 +235,7 @@ def test_invalid_session_is_rejected_before_state_changes(view, tmp_path):
     then raised KeyError inside loaded(), leaving loading_controls stuck on
     so automatic updates were silently ignored."""
     from PySide6.QtWidgets import QApplication
+
     from poreckit_gui.app import Browser
     app = QApplication.instance() or QApplication([])
     browser = Browser()
@@ -272,7 +276,6 @@ def test_invalid_session_is_rejected_before_state_changes(view, tmp_path):
                    "region": "chr1:0-2,000,000",
                    "tracks": [{"kind": "genes", "path": str(genes), "visible": True}]}
         browser.pending_session = session
-        original = browser.append_track
         browser.append_track = lambda track: (_ for _ in ()).throw(RuntimeError("boom"))
         try:
             browser.loaded(browser.metadata)
@@ -291,6 +294,7 @@ def test_session_round_trip_restores_view_and_cleans_temp_dir(tmp_path, monkeypa
     Browser must reinstate region and display settings, render again, and
     clean up each browser instance's temporary directory."""
     from PySide6.QtWidgets import QApplication, QFileDialog
+
     from poreckit_gui.app import Browser
     app = QApplication.instance() or QApplication([])
     browser = Browser()

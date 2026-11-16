@@ -86,6 +86,11 @@ jobs:
           args=()
           if [[ "$RUNNER_OS" != "macOS" ]]; then args+=(-n auto); fi
           uv run --no-sync pytest -q "${args[@]}" --timeout=300
+      - name: Lint and type-check
+        shell: bash
+        run: |
+          uv run --no-sync ruff check src tests scripts
+          uv run --no-sync mypy src/poreckit_gui
       - name: Optional macOS signing and notarization credentials
         if: runner.os == 'macOS' && github.event_name != 'pull_request'
         shell: bash

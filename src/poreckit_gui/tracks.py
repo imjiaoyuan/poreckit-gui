@@ -3,8 +3,8 @@ from dataclasses import dataclass
 
 import numpy as np
 from matplotlib.ticker import MaxNLocator
-from poreckit.tracks.base import BaseTrack
 from poreckit import TrackLoop
+from poreckit.tracks.base import BaseTrack
 
 
 def query_signal(path, chrom, start, end, bins, index=None):
@@ -12,8 +12,8 @@ def query_signal(path, chrom, start, end, bins, index=None):
     if not source_path(path).lower().endswith(('.bedgraph','.bg','.bedgraph.gz','.bg.gz')):
         from .bigwig import query_bigwig
         return query_bigwig(path,chrom,start,end,bins)
-    from .sequenceio import tabix_lines
     from .model import Region
+    from .sequenceio import tabix_lines
     values=np.zeros(bins,dtype=float)
     covered=np.zeros(bins,dtype=float)
     width=(end-start)/bins
@@ -49,7 +49,7 @@ class SquareLoopOverlay(TrackLoop):
         def same(a, b):
             return a.removeprefix("chr") == b.removeprefix("chr")
         seen = set()
-        for c1, s1, e1, c2, s2, e2, score in self.loops:
+        for c1, s1, e1, c2, s2, e2, _score in self.loops:
             for a, lo1, hi1, b, lo2, hi2 in ((c1, s1, e1, c2, s2, e2), (c2, s2, e2, c1, s1, e1)):
                 key = (lo1, hi1, lo2, hi2)
                 if key in seen or not same(a, self.chrom) or not same(b, self.y_chrom):

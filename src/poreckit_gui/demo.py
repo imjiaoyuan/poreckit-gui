@@ -29,7 +29,7 @@ def create_demo(folder, chromosomes=None, scale=1):
         bins = f.create_group("bins")
         bins["chrom"] = np.repeat(np.arange(len(sizes), dtype="int32"), sizes)
         bins["start"] = np.concatenate([np.arange(size, dtype="int64") * step for size in sizes])
-        bins["end"] = np.concatenate([np.minimum((np.arange(size, dtype="int64")+1)*step, length) for size, length in zip(sizes, lengths)])
+        bins["end"] = np.concatenate([np.minimum((np.arange(size, dtype="int64")+1)*step, length) for size, length in zip(sizes, lengths, strict=False)])
         pixels = f.create_group("pixels")
         pixels["bin1_id"], pixels["bin2_id"], pixels["count"] = i, j, count
         indexes = f.create_group("indexes")

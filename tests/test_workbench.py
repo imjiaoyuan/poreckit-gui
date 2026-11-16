@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from poreckit_gui.catalog import catalog, fields, cli_arguments, cli_command, resolve
+from poreckit_gui.catalog import catalog, cli_arguments, cli_command, fields, resolve
 from poreckit_gui.demo import create_demo
 from poreckit_gui.execution import execute_plot
 from poreckit_gui.plotdata import load_value
@@ -92,7 +92,7 @@ def test_structured_data_loads_arrays_without_executing_code(tmp_path):
 
 @pytest.fixture
 def contacts(tmp_path):
-    from poreckit import ContactDataset, ContactRead, ContactFragment, write_contacts
+    from poreckit import ContactDataset, ContactFragment, ContactRead, write_contacts
     reads = []
     for i in range(20):
         fragments = tuple(ContactFragment("chr1", i * 1000 + offset, i * 1000 + offset + 500)
@@ -145,9 +145,10 @@ def test_api_axes_multi_panel_and_track_stack(tmp_path):
 
 
 def test_workbench_render_zoom_pan_export_preset_and_cancel(tmp_path, monkeypatch):
-    from PySide6.QtWidgets import QApplication, QFileDialog
     from PySide6.QtCore import QPoint, Qt
     from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication, QFileDialog
+
     from poreckit_gui.app import Browser
     app = QApplication.instance() or QApplication([])
     browser = Browser()
@@ -241,6 +242,7 @@ def test_workbench_run_directories_are_reaped_during_the_session(tmp_path):
     """Regression: run directories and cancelled/failed runs once accumulated
     until the window closed."""
     from PySide6.QtWidgets import QApplication
+
     from poreckit_gui.app import Browser
     app = QApplication.instance() or QApplication([])
     browser = Browser()

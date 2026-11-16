@@ -6,7 +6,7 @@ import pytest
 from poreckit_gui.demo import create_demo
 from poreckit_gui.model import Region
 from poreckit_gui.viewport import Viewport
-from poreckit_gui.windows import translated_viewport, WindowController
+from poreckit_gui.windows import WindowController, translated_viewport
 
 
 def test_linked_coordinates_require_matching_genomes_and_handle_chr_aliases():
@@ -23,6 +23,7 @@ def test_linked_coordinates_require_matching_genomes_and_handle_chr_aliases():
 
 def test_gui_linked_windows_keep_samples_and_queue_latest_navigation(tmp_path):
     from PySide6.QtWidgets import QApplication
+
     from poreckit_gui.app import Browser
     app = QApplication.instance() or QApplication([])
     first, second = Browser(), Browser()
@@ -83,6 +84,7 @@ def test_gui_linked_windows_keep_samples_and_queue_latest_navigation(tmp_path):
 
 def test_duplicated_temporary_data_survives_original_window_close():
     from PySide6.QtWidgets import QApplication
+
     from poreckit_gui.app import Browser
     app = QApplication.instance() or QApplication([])
     first = Browser()

@@ -6,16 +6,19 @@ import tempfile
 import time
 import traceback
 from pathlib import Path
+from typing import Any
+
+from PySide6.QtCore import QSettings
+from PySide6.QtWidgets import QApplication
+
+from .app import Browser
+from .catalog import catalog
+from .demo import create_demo
 
 
 def run(report_path):
-    from PySide6.QtWidgets import QApplication
-    from PySide6.QtCore import QSettings
-    from .app import Browser
-    from .demo import create_demo
-    from .catalog import catalog
-    report = dict(ok=False, frozen=bool(getattr(sys, "frozen", False)), platform=platform.platform(), checks=[])
-    browser = None
+    report: dict[str, Any] = dict(ok=False, frozen=bool(getattr(sys, "frozen", False)), platform=platform.platform(), checks=[])
+    browser: Browser | None = None
     config = tempfile.TemporaryDirectory(prefix="poreckit-selftest-config-")
     try:
         app = QApplication.instance() or QApplication([])
@@ -23,8 +26,9 @@ def run(report_path):
         browser.auto_update.setChecked(False)
         browser.show()
         errors = []
-        browser.error = lambda value: errors.append(str(value))
-        browser.plot_workbench.error = lambda value: errors.append(str(value))
+        # Intentional test-hook patching of an existing method.
+        browser.error = lambda value: errors.append(str(value))  # type: ignore[method-assign]
+        browser.plot_workbench.error = lambda value: errors.append(str(value))  # type: ignore[method-assign]
         def wait():
             deadline = time.monotonic()+90
             def busy():
@@ -38,7 +42,7 @@ def run(report_path):
         with tempfile.TemporaryDirectory(prefix="poreckit-selftest-") as folder:
             browser.load_file(create_demo(folder, [("chr1", 1200000), ("chr2", 800000)]))
             wait()
-            assert browser.image.map_data.observed.shape == (120, 120)
+            assert browser.image.map_data is not None and browser.image.map_data.observed.shape == (120, 120)
             report["checks"].append("native reader and GUI rendering")
             pid = browser.process.processId()
             signal = Path(folder)/"signal.bg"
@@ -51,7 +55,7 @@ def run(report_path):
             report["checks"].append("persistent worker reuse and signal track")
             browser.genome_dialog.open()
             wait()
-            assert browser.genome_dialog.image.map_data.observed.shape == (200, 200)
+            assert browser.genome_dialog.image.map_data is not None and browser.genome_dialog.image.map_data.observed.shape == (200, 200)
             report["checks"].append("whole-genome sparse aggregation")
             from .demo import create_track_demo
             sequence = browser.sequence_browser

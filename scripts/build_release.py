@@ -7,12 +7,12 @@ import io
 import json
 import os
 import platform
+import shlex
 import shutil
 import subprocess
 import sys
 import tarfile
 import tempfile
-import shlex
 import tomllib
 from pathlib import Path
 

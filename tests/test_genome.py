@@ -7,7 +7,7 @@ import pytest
 
 from poreckit_gui.cache import RenderCache
 from poreckit_gui.demo import create_demo
-from poreckit_gui.genome import genome_data, draw_genome
+from poreckit_gui.genome import draw_genome, genome_data
 from poreckit_gui.mapdata import MapData
 
 
@@ -19,7 +19,7 @@ def test_sparse_coarsening_respects_chromosome_edges_and_storage(tmp_path, monke
     target = [0, 0, 1, 1, 2, 2, 3]
     expected = np.zeros((4, 4))
     with h5py.File(path, "r") as f:
-        for b1, b2, count in zip(f["pixels/bin1_id"][:], f["pixels/bin2_id"][:], f["pixels/count"][:]):
+        for b1, b2, count in zip(f["pixels/bin1_id"][:], f["pixels/bin2_id"][:], f["pixels/count"][:], strict=False):
             a, b = target[b1], target[b2]
             expected[a, b] += count
             if a != b:
@@ -52,8 +52,9 @@ def test_square_storage_overview_matches_directed_pixels_across_chunks(tmp_path,
     """The whole-genome tiled path must honour directed square storage: every
     stored pixel is added exactly once at (row, col) with no mirroring, even
     when the bin and pixel tables are read in several chunks."""
-    import poreckit_gui.genome as genome
     from test_tracks_and_cache import write_square_storage_cooler
+
+    import poreckit_gui.genome as genome
     # Small CHUNK so both the bin lookup and the pixel loop cross chunk
     # boundaries (65 bins, 2*40*25=2000 stored pixels).
     monkeypatch.setattr(genome, "CHUNK", 17)
@@ -67,7 +68,7 @@ def test_square_storage_overview_matches_directed_pixels_across_chunks(tmp_path,
         b1 = f["pixels/bin1_id"][:]
         b2 = f["pixels/bin2_id"][:]
         counts = f["pixels/count"][:]
-    for a, b, value in zip(b1, b2, counts):
+    for a, b, value in zip(b1, b2, counts, strict=False):
         expected[a, b] += float(value)
     assert expected[3, n1+5] == 3005 and expected[n1+5, 3] == 5003
     state = RenderCache()
@@ -103,9 +104,10 @@ def test_native_reader_overview_uses_rectangular_trans_blocks(tmp_path, monkeypa
 
 
 def test_overview_gui_navigation_and_exports(tmp_path, monkeypatch):
-    from PySide6.QtWidgets import QApplication, QFileDialog
     from PySide6.QtCore import Qt
     from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication, QFileDialog
+
     from poreckit_gui.app import Browser
     app = QApplication.instance() or QApplication([])
     b = Browser()

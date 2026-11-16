@@ -1,12 +1,22 @@
 """Native scaffold editing with a live, lifted contact map."""
-import json
 from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QAbstractItemView,QCheckBox,QComboBox,QFileDialog,QHBoxLayout,QInputDialog,
-    QLabel,QLineEdit,QMessageBox,QPushButton,QSpinBox,QSplitter,QTreeWidget,
-    QTreeWidgetItem,QVBoxLayout,
+    QAbstractItemView,
+    QCheckBox,
+    QComboBox,
+    QFileDialog,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QSplitter,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
 )
 
 from .assembly import Assembly
@@ -31,7 +41,9 @@ class ScaffoldTree(QTreeWidget):
             groups=[]
             for i in range(self.topLevelItemCount()):
                 root=self.topLevelItem(i)
-                groups.append([root.child(j).data(0,Qt.ItemDataRole.UserRole) for j in range(root.childCount())])
+                assert root is not None  # i < topLevelItemCount()
+                children=[root.child(j) for j in range(root.childCount())]
+                groups.append([child.data(0,Qt.ItemDataRole.UserRole) for child in children if child is not None])
             try:
                 self.editor.document.edit(lambda:setattr(self.editor.document,'groups',groups))
                 self.editor.refresh()
@@ -40,9 +52,11 @@ class ScaffoldTree(QTreeWidget):
 
 
 class AssemblyEditor(DataView):
+    canvas: ImageView
+    document: Assembly
     def __init__(self,browser):
         super().__init__(browser)
-        self.document=None
+        self.document=None  # type: ignore[assignment]  # cleared until an assembly is loaded or built
         self.input_path=''
         self.reference=''
         self.session_path=None
@@ -200,11 +214,16 @@ class AssemblyEditor(DataView):
             raise ValueError('Select one or more contiguous fragments')
         if any(item.parent() is None for item in selected):
             raise ValueError('Select fragment rows inside a scaffold')
-        parents={self.tree.indexOfTopLevelItem(item.parent()) for item in selected}
-        if len(parents)!=1:
-            raise ValueError('Select fragments within one scaffold')
+        for item in selected:
+            assert item.parent() is not None  # roots rejected above
+        parents=set()
+        positions=[]
+        for item in selected:
+            parent=item.parent()
+            assert parent is not None  # roots rejected above
+            parents.add(self.tree.indexOfTopLevelItem(parent))
+            positions.append(parent.indexOfChild(item))
         group=parents.pop()
-        positions=sorted(item.parent().indexOfChild(item) for item in selected)
         if positions!=list(range(positions[0],positions[-1]+1)):
             raise ValueError('Select contiguous fragments')
         return group,positions[0],positions[-1]
@@ -221,7 +240,7 @@ class AssemblyEditor(DataView):
     def invert(self):
         self.perform(lambda:self.document.invert(*self.selection()))
 
-    def move(self,delta):
+    def move(self,delta):  # type: ignore[override]  # pan helper, not QWidget.move()
         def operation():
             group,first,last=self.selection()
             target=max(0,min(len(self.document.groups[group]),first-1 if delta<0 else last+2))
@@ -241,7 +260,7 @@ class AssemblyEditor(DataView):
             group,first,last=self.selection()
             if first!=last:
                 raise ValueError('Select one fragment to cut')
-            f=self.document.fragments[abs(self.document.groups[group][first])]
+            _=self.document.fragments[abs(self.document.groups[group][first])]
             # Text input supports coordinates above Qt's signed 32-bit spinbox range.
             value,ok=QInputDialog.getText(self,'Cut fragment','Cut offset from the left in the current orientation (bp)')
             if ok:

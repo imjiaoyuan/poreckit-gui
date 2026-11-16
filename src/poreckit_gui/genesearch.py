@@ -3,6 +3,7 @@ import functools
 import gzip
 import re
 from pathlib import Path
+from typing import Any
 from urllib.parse import unquote
 
 
@@ -16,7 +17,8 @@ def attributes(text):
 
 @functools.lru_cache(maxsize=2)
 def _index(path, mtime, size, inode):
-    genes, fallback = {}, {}
+    genes: dict[tuple[str, str], dict[str, Any]] = {}
+    fallback: dict[tuple[str, str], dict[str, Any]] = {}
     opener = gzip.open if path.lower().endswith(".gz") else open
     with opener(path, "rt", encoding="utf-8-sig") as stream:
         for line_no, line in enumerate(stream, 1):

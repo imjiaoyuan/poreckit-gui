@@ -1,23 +1,42 @@
 """Independent Qt signal, alignment, variant and reference browser."""
 from __future__ import annotations
 
-import heapq
 import json
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal, QTimer, QRectF
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
-    QDoubleSpinBox, QFileDialog, QFormLayout, QGraphicsScene, QGraphicsView,
-    QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu,
-    QMessageBox, QPlainTextEdit, QPushButton, QSpinBox, QSplitter, QVBoxLayout,
+    QAbstractItemView,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QDoubleSpinBox,
+    QFileDialog,
+    QFormLayout,
+    QGraphicsEllipseItem,
+    QGraphicsRectItem,
+    QGraphicsScene,
+    QGraphicsView,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
+    QSpinBox,
+    QSplitter,
+    QVBoxLayout,
+    QWidget,
 )
 
 from .dataview import DataView
 from .model import Region
-from .sequenceio import file_kind
 from .remote import is_remote, source_path
+from .sequenceio import file_kind
 
 BASE_COLORS={'A':'#279c50','C':'#3376ce','G':'#bd9415','T':'#cf4545','N':'#888888','=':'#888888'}
 
@@ -30,7 +49,7 @@ class TrackOptions(QDialog):
         layout=QVBoxLayout(self)
         form=QFormLayout()
         layout.addLayout(form)
-        self.fields={}
+        self.fields: dict[str, QWidget] = {}
         def field(name,label,widget):
             self.fields[name]=widget
             form.addRow(label,widget)
@@ -45,30 +64,30 @@ class TrackOptions(QDialog):
                 field(key,label,box)
             field('group','Shared axis group',QLineEdit(track.get('group','signals')))
             for key,label,default in [('ymin','Minimum',0),('ymax','Maximum',1)]:
-                box=QDoubleSpinBox()
-                box.setRange(-1e15,1e15)
-                box.setDecimals(5)
-                box.setValue(float(track.get(key,default)))
-                field(key,label,box)
+                spin=QDoubleSpinBox()
+                spin.setRange(-1e15,1e15)
+                spin.setDecimals(5)
+                spin.setValue(float(track.get(key,default)))
+                field(key,label,spin)
         elif track['kind']=='alignment':
             for key,label,default,maximum in [('mapq','Minimum mapping quality',0,255),('baseq','Minimum base quality (mismatch colors)',0,93),('max_reads','Displayed reads',1000,10000),('record_limit','Query record limit (0 = all)',0,2147483647)]:
-                box=QSpinBox()
-                box.setRange(0 if key!='max_reads' else 1,maximum)
-                box.setValue(int(track.get(key,default)))
-                field(key,label,box)
+                spin=QSpinBox()  # type: ignore[assignment]  # only setRange/setValue are shared with QDoubleSpinBox
+                spin.setRange(0 if key!='max_reads' else 1,maximum)
+                spin.setValue(int(track.get(key,default)))
+                field(key,label,spin)
             for key,label,default in [('duplicates','Include duplicates',False),('secondary','Include secondary',False),('supplementary','Include supplementary',True),('pairs','Connect read pairs',False),('junction_arcs','Show splice junctions',True)]:
-                box=QCheckBox()
-                box.setChecked(track.get(key,default))
-                field(key,label,box)
+                check=QCheckBox()
+                check.setChecked(track.get(key,default))
+                field(key,label,check)
             for key,label,values in [('sort','Sort reads',['position','name','strand','mapq']),('read_color','Color reads by',['strand','mapping quality'])]:
                 box=QComboBox()
                 box.addItems(values)
                 box.setCurrentText(track.get(key,values[0]))
                 field(key,label,box)
         elif track['kind']=='variants':
-            box=QCheckBox()
-            box.setChecked(track.get('pass_only',False))
-            field('pass_only','PASS / unfiltered only',box)
+            check=QCheckBox()
+            check.setChecked(track.get('pass_only',False))
+            field('pass_only','PASS / unfiltered only',check)
         if track['kind'] in {'alignment','variants'}:
             field('index','Index file / URL',QLineEdit(track.get('index') or ''))
         buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
@@ -77,14 +96,23 @@ class TrackOptions(QDialog):
         layout.addWidget(buttons)
 
     def accept(self):
-        values={}
+        values: dict[str, str | int | float | bool] = {}
         for key,widget in self.fields.items():
-            values[key]=(widget.text() if isinstance(widget,QLineEdit) else widget.currentText() if isinstance(widget,QComboBox)
-                         else widget.isChecked() if isinstance(widget,QCheckBox) else widget.value())
+            value: str | bool | int | float
+            if isinstance(widget,QLineEdit):
+                value=widget.text()
+            elif isinstance(widget,QComboBox):
+                value=widget.currentText()
+            elif isinstance(widget,QCheckBox):
+                value=widget.isChecked()
+            else:
+                assert isinstance(widget,(QDoubleSpinBox,QSpinBox))  # only spinboxes remain
+                value=widget.value()
+            values[key]=value
         if not QColor(values['color']).isValid():
             QMessageBox.warning(self,'Track settings','Enter a valid color')
             return
-        if values.get('scale')=='fixed' and values['ymin']>=values['ymax']:
+        if values.get('scale')=='fixed' and float(values['ymin'])>=float(values['ymax']):
             QMessageBox.warning(self,'Track settings','Minimum must be below maximum')
             return
         self.track.update(values)
@@ -92,6 +120,7 @@ class TrackOptions(QDialog):
 
 
 class TrackCanvas(QGraphicsView):
+    result: dict
     navigate=Signal(float,float)
     pan=Signal(float)
     selected=Signal(object)
@@ -103,7 +132,7 @@ class TrackCanvas(QGraphicsView):
         self.setAlignment(Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignTop)
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.setMouseTracking(True)
-        self.result=None
+        self.result=None  # type: ignore[assignment]  # cleared until a query result arrives
         self.drag=None
         self.margin=145
         self.plot_width=800
@@ -116,7 +145,7 @@ class TrackCanvas(QGraphicsView):
         super().resizeEvent(event)
         self.resize_timer.start()
 
-    def x(self,pos):
+    def x(self,pos):  # type: ignore[override]  # coordinate helper, not QWidget.x()
         r=self.region
         return self.margin+self.plot_width*(max(r.start,min(r.end,pos))-r.start)/(r.end-r.start)
 
@@ -129,7 +158,7 @@ class TrackCanvas(QGraphicsView):
         item.setPos(x,y)
         return item
 
-    def rect(self,start,end,y,height,color,record=None):
+    def rect(self,start,end,y,height,color,record=None):  # type: ignore[override]  # drawing helper, not QWidget.rect()
         item=self.scene().addRect(self.x(start),y,max(1,self.x(end)-self.x(start)),height,QPen(Qt.PenStyle.NoPen),QColor(color))
         if record is not None:
             item.setData(0,record)
@@ -191,7 +220,7 @@ class TrackCanvas(QGraphicsView):
             elif track['kind']=='alignment':
                 y=self.alignments(track,data,y,seq)
             else:
-                lanes=[]
+                lanes: list = []
                 hidden=0
                 for record in sorted(data['records'],key=lambda v:v['start']):
                     row=next((i for i,end in enumerate(lanes) if end<=record['start']),len(lanes))
@@ -251,7 +280,7 @@ class TrackCanvas(QGraphicsView):
             b=self.region.start+(i+1)*(self.region.end-self.region.start)/len(values)
             x=self.x((a+b)/2)
             if mode in {'fill','bar'}:
-                item=self.scene().addRect(self.x(a),min(zero,sy(value)),max(.3,self.x(b)-self.x(a)),max(.3,abs(zero-sy(value))),QPen(Qt.PenStyle.NoPen),color)
+                item: QGraphicsRectItem | QGraphicsEllipseItem = self.scene().addRect(self.x(a),min(zero,sy(value)),max(.3,self.x(b)-self.x(a)),max(.3,abs(zero-sy(value))),QPen(Qt.PenStyle.NoPen),color)
             elif mode=='points':
                 item=self.scene().addEllipse(x-1,sy(value)-1,2,2,QPen(color),color)
             else:
@@ -292,8 +321,8 @@ class TrackCanvas(QGraphicsView):
                 item.setToolTip(f"Splice junction {junction['start']:,}–{junction['end']:,}: {junction['count']} reads")
                 self.text(junction['count'],(a+b)/2,y-2,'#6f55a3',7)
             y+=40
-        lanes=[]
-        pairs={}
+        lanes: list = []
+        pairs: dict = {}
         hidden=0
         for record in data['records']:
             row=next((i for i,end in enumerate(lanes) if end<=record['start']),len(lanes))
@@ -326,7 +355,7 @@ class TrackCanvas(QGraphicsView):
                             self.rect(pos,pos+1,top,10,BASE_COLORS.get(base,'#999999'),record)
                             if self.plot_width/(self.region.end-self.region.start)>10:
                                 self.text(base,self.x(pos),top-2,'#ffffff',7)
-            for op,pos,n,q in record['edits']:
+            for op,pos,n,_q in record['edits']:
                 if self.region.start<=pos<self.region.end:
                     if op in 'IS':
                         self.scene().addLine(self.x(pos),top-2,self.x(pos),top+12,QPen(QColor('#a531bd' if op=='I' else '#e2a22c'),2)).setToolTip(f'{op}: {n} bases')
@@ -391,6 +420,9 @@ class TrackCanvas(QGraphicsView):
 
 
 class SequenceBrowser(DataView):
+    canvas: TrackCanvas
+    hover: QLabel
+    result: dict
     def __init__(self,browser):
         super().__init__(browser)
         self.chromsizes={}
@@ -398,7 +430,7 @@ class SequenceBrowser(DataView):
         self.region=None
         self.history=[]
         self.history_index=-1
-        self.result=None
+        self.result=None  # type: ignore[assignment]  # cleared until a query result arrives
         self.loading=False
         self.current_session=None
         layout=QVBoxLayout(self)
@@ -483,11 +515,11 @@ class SequenceBrowser(DataView):
         self.reference=''
         self.chromsizes={}
         self.region=None
-        self.result=None
+        self.result=None  # type: ignore[assignment]  # cleared until a query result arrives
         self.history=[]
         self.history_index=-1
         self.canvas.scene().clear()
-        self.canvas.result=None
+        self.canvas.result=None  # type: ignore[assignment]  # cleared until a query result arrives
         self.sync_chroms()
         self.locus.clear()
 
@@ -569,7 +601,7 @@ class SequenceBrowser(DataView):
     def sync_chroms(self):
         self.chrom.blockSignals(True)
         self.chrom.clear()
-        self.chrom.addItems(self.chromsizes)
+        self.chrom.addItems(list(self.chromsizes))
         if self.region:
             self.chrom.setCurrentText(self.region.chrom)
         self.chrom.blockSignals(False)
@@ -595,8 +627,8 @@ class SequenceBrowser(DataView):
             self.history_index=len(self.history)-1
         self.query()
         if self.track_link.isChecked() and not linked:
-            from .windows import WindowController
             from .sequenceio import chromosome
+            from .windows import WindowController
             for controller in list(WindowController.instances):
                 target=controller.browser.sequence_browser
                 if target is self or not target.track_link.isChecked():
@@ -630,7 +662,7 @@ class SequenceBrowser(DataView):
             span=r.end-r.start
             self.navigate(r.window(r.start+span*fraction-span*factor*fraction,span*factor,self.chromsizes.get(r.chrom)))
 
-    def move(self,fraction):
+    def move(self,fraction):  # type: ignore[override]  # pan helper, not QWidget.move()
         if self.region:
             self.navigate(self.region.pan(fraction,self.chromsizes.get(self.region.chrom)))
 
@@ -762,6 +794,7 @@ class SequenceBrowser(DataView):
             self.status.setText('Select a BAM track; CRAM uses its source CRAI index')
             return
         import hashlib
+
         from .sequenceio import version
         name=hashlib.sha256(repr(version(track['path'])).encode()).hexdigest()+'.bai'
         output=str(Path(self.temp.name)/name)

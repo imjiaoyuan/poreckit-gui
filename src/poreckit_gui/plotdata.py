@@ -10,7 +10,8 @@ import numpy as np
 def load_value(value, context=None, resources=None, seen=None):
     context = context or {}
     seen = set() if seen is None else seen
-    recurse = lambda v: load_value(v, context, resources, seen)
+    def recurse(v):
+        return load_value(v, context, resources, seen)
     if isinstance(value, list):
         return [recurse(v) for v in value]
     if not isinstance(value, dict):
@@ -52,6 +53,7 @@ def load_value(value, context=None, resources=None, seen=None):
         return read_contacts(value["$contacts"])
     if "$matrix" in value:
         from poreckit import make_reader
+
         from .model import Region
         spec = {**context, **(value["$matrix"] if isinstance(value["$matrix"], dict) else {})}
         if not spec.get("input") or not spec.get("region"):

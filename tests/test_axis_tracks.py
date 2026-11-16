@@ -1,6 +1,4 @@
-from pathlib import Path
 
-import numpy as np
 import pytest
 
 from poreckit_gui.axistracks import placement
@@ -91,8 +89,9 @@ def test_square_axis_tracks_coordinate_projection_and_2d_boxes(tmp_path, monkeyp
 
 def test_track_settings_exposes_axis_placements():
     from PySide6.QtWidgets import QApplication, QDialog
+
     from poreckit_gui.tracksettings import TrackSettings
-    app = QApplication.instance() or QApplication([])
+    _app = QApplication.instance() or QApplication([])
     dialog = TrackSettings(dict(kind="genes", path="genes.gtf", placement="auto"))
     assert dialog.placement.currentData() == "auto"
     dialog.placement.setCurrentIndex(dialog.placement.findData("both"))

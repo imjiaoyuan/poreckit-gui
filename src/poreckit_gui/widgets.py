@@ -1,7 +1,13 @@
-from PySide6.QtCore import Qt, Signal, QRectF, QRect
-from PySide6.QtGui import QPainter, QPixmap, QPen, QColor
-from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QWidget, QRubberBand
+from typing import TYPE_CHECKING
+
+from PySide6.QtCore import QRect, QRectF, Qt, Signal
+from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 from PySide6.QtSvgWidgets import QGraphicsSvgItem
+from PySide6.QtWidgets import QGraphicsScene, QGraphicsView, QRubberBand, QWidget
+
+if TYPE_CHECKING:
+    from .mapdata import MapData
+
 
 
 class ImageView(QGraphicsView):
@@ -25,7 +31,7 @@ class ImageView(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.fit_mode = True
         self.fit_scale = 1.0
-        self.map_data = None
+        self.map_data: MapData | None = None
         self.data_rect = QRectF()
         self.data_navigation = True
         self.crosshair = False
@@ -111,7 +117,7 @@ class ImageView(QGraphicsView):
     def mouseMoveEvent(self, event):
         point = event.position().toPoint()
         fraction = self.fractions(point)
-        if fraction:
+        if fraction and self.map_data is not None:
             self.binHovered.emit(self.map_data.at(*fraction))
         if self.press and self.press[2]:
             self.rubber.setGeometry(QRect(self.press[0], point).normalized())
@@ -159,7 +165,7 @@ class ImageView(QGraphicsView):
 
     def mouseDoubleClickEvent(self, event):
         fraction = self.fractions(event.position().toPoint())
-        if fraction and self.map_data.spec.get("chromosomes"):
+        if fraction and self.map_data is not None and self.map_data.spec.get("chromosomes"):
             self.binActivated.emit(self.map_data.at(*fraction))
             event.accept()
             return

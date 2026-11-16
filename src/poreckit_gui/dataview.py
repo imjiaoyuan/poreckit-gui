@@ -1,19 +1,24 @@
 """Cancellable data queries and portable export for native genomic views."""
 import json
-import os
 import sys
 import tempfile
 from pathlib import Path
+from typing import cast
 
 from PySide6.QtCore import QProcess, QProcessEnvironment, QRectF, Qt
-from PySide6.QtGui import QImage, QPainter, QPdfWriter, QPageSize
+from PySide6.QtGui import QImage, QPageSize, QPaintDevice, QPainter, QPdfWriter
 from PySide6.QtSvg import QSvgGenerator
-from PySide6.QtWidgets import QWidget, QFileDialog
+from PySide6.QtWidgets import QFileDialog, QGraphicsView, QLabel, QWidget
 
 from .jobs import JobProcess
 
 
 class DataView(QWidget):
+    # Set by subclasses (SequenceBrowser, AssemblyEditor), which own the
+    # concrete widgets; the base class only reads/updates them.
+    status: QLabel
+    canvas: QGraphicsView
+
     def __init__(self, browser):
         super().__init__()
         self.browser = browser
@@ -106,7 +111,8 @@ class DataView(QWidget):
     def shutdown(self):
         self.pending=[]
         self.process.shutdown()
-        from .sessionio import cleanup_temp; cleanup_temp(self.temp.name)
+        from .sessionio import cleanup_temp
+        cleanup_temp(self.temp.name)
 
     def export(self):
         path,_=QFileDialog.getSaveFileName(self,'Export view','view.svg','SVG (*.svg);;PNG (*.png);;PDF (*.pdf)')
@@ -123,6 +129,7 @@ def export_scene(scene,path):
     bounds=scene.sceneRect()
     size=QSize(max(1,int(bounds.width())),max(1,int(bounds.height())))
     suffix=Path(path).suffix.lower()
+    device: QPaintDevice
     if suffix=='.svg':
         device=QSvgGenerator()
         device.setFileName(str(path))
@@ -150,5 +157,5 @@ def export_scene(scene,path):
         scene.render(painter,target,bounds,Qt.AspectRatioMode.KeepAspectRatio)
     finally:
         painter.end()
-    if suffix=='.png' and not device.save(str(path)):
+    if suffix=='.png' and not cast(QImage,device).save(str(path)):
         raise OSError('Unable to write PNG')

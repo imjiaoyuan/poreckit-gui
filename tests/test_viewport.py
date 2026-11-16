@@ -1,15 +1,14 @@
 import json
 import time
-from pathlib import Path
 
 import numpy as np
 import pytest
 
-from poreckit_gui.model import Region
-from poreckit_gui.viewport import Viewport
 from poreckit_gui.contactview import transform_matrix
 from poreckit_gui.demo import create_demo
 from poreckit_gui.mapdata import MapData
+from poreckit_gui.model import Region
+from poreckit_gui.viewport import Viewport
 from poreckit_gui.worker import render
 
 
@@ -79,9 +78,10 @@ def test_control_render_and_incompatible_genome(tmp_path):
 
 
 def test_gui_data_drag_zoom_hover_and_session(tmp_path, monkeypatch):
-    from PySide6.QtWidgets import QApplication, QFileDialog
-    from PySide6.QtCore import Qt, QPoint
+    from PySide6.QtCore import QPoint, Qt
     from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication, QFileDialog
+
     from poreckit_gui.app import Browser
     app = QApplication.instance() or QApplication([])
     browser = Browser()

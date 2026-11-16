@@ -16,7 +16,7 @@ def svg_plot_bounds(path):
         return None
     coords = np.asarray([float(n) for n in re.findall(r"[-+]?(?:\d*\.\d+|\d+)(?:[eE][-+]?\d+)?", shape.attrib["d"])])
     points = coords.reshape(-1, 2)
-    box = [float(points[:, 0].min()), float(points[:, 1].min()), float(np.ptp(points[:, 0])), float(np.ptp(points[:, 1]))]
+    box = [float(np.min(points[:, 0])), float(np.min(points[:, 1])), float(np.ptp(points[:, 0])), float(np.ptp(points[:, 1]))]
     viewbox = [float(v) for v in root.attrib["viewBox"].split()]
     return {"bounds": box, "svg_size": viewbox[2:]}
 

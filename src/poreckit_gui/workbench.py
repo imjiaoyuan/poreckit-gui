@@ -8,22 +8,44 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QProcess, QProcessEnvironment
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QTreeWidget,
-    QTreeWidgetItem, QLineEdit, QLabel, QPushButton, QStackedWidget, QComboBox,
-    QListWidget, QListWidgetItem, QAbstractItemView, QFileDialog, QMessageBox,
-    QPlainTextEdit, QProgressBar)
+from PySide6.QtCore import QProcess, QProcessEnvironment, Qt
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QComboBox,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
+    QPlainTextEdit,
+    QProgressBar,
+    QPushButton,
+    QSplitter,
+    QStackedWidget,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
-from .catalog import catalog
+from .catalog import Entry, catalog
 from .forms import ParameterForm
+from .jobs import JobProcess
 from .model import Region
 from .widgets import ImageView
-from .jobs import JobProcess
 
 DIALOG = QFileDialog.Option.DontUseNativeDialog
 
 
 class PlotWorkbench(QWidget):
+    result: dict
+    # Widgets/attributes created or replaced after construction; every use
+    # below happens after the corresponding setup has run.
+    selected: Entry
+    form: ParameterForm
+
     def __init__(self, browser):
         super().__init__()
         self.browser = browser
@@ -31,9 +53,9 @@ class PlotWorkbench(QWidget):
         self.temp = tempfile.TemporaryDirectory(prefix="poreckit-plots-")
         self.job = None
         self.serial = 0
-        self.result = None
-        self.form = None
-        self.selected = None
+        self.result = None  # type: ignore[assignment]  # cleared until a plot result arrives
+        self.form = None  # type: ignore[assignment]  # ParameterForm built when an entry is selected
+        self.selected = None  # type: ignore[assignment]  # Entry set in selection_changed
         self.cancelled = False
         self.form_cache = {}
         self.process = JobProcess(self)
@@ -218,9 +240,11 @@ class PlotWorkbench(QWidget):
         needle = text.lower().strip()
         for index in range(self.tree.topLevelItemCount()):
             group = self.tree.topLevelItem(index)
+            assert group is not None  # index < topLevelItemCount()
             visible = False
             for child_index in range(group.childCount()):
                 item = group.child(child_index)
+                assert item is not None  # child_index < childCount()
                 entry = self.entries[item.data(0, Qt.ItemDataRole.UserRole)]
                 match = not needle or needle in (entry.title + " " + entry.group + " " + entry.description).lower()
                 item.setHidden(not match)
@@ -234,8 +258,10 @@ class PlotWorkbench(QWidget):
             raise ValueError(f"Unknown plot entry: {key}")
         for index in range(self.tree.topLevelItemCount()):
             group = self.tree.topLevelItem(index)
+            assert group is not None  # index < topLevelItemCount()
             for child_index in range(group.childCount()):
                 item = group.child(child_index)
+                assert item is not None  # child_index < childCount()
                 if item.data(0, Qt.ItemDataRole.UserRole) == key:
                     self.tree.setCurrentItem(item)
                     group.setExpanded(True)
@@ -567,4 +593,5 @@ class PlotWorkbench(QWidget):
             self.process.waitForFinished(3000)
             self.job = None
         self.process.shutdown()
-        from .sessionio import cleanup_temp; cleanup_temp(self.temp.name)
+        from .sessionio import cleanup_temp
+        cleanup_temp(self.temp.name)

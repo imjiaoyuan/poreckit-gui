@@ -2,11 +2,23 @@
 from __future__ import annotations
 
 import json
-from PySide6.QtCore import Qt
 
-from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QLineEdit, QPlainTextEdit,
-                              QComboBox, QPushButton, QFileDialog, QCheckBox, QLabel,
-                              QScrollArea, QFormLayout)
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QFileDialog,
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPlainTextEdit,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
+)
+
 from .catalog import fields
 
 
@@ -19,7 +31,7 @@ class ValueField(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         kind, default = spec["kind"], spec.get("default")
         if kind in {"bool", "flag", "choice"}:
-            self.editor = QComboBox()
+            self.editor: QComboBox | QPlainTextEdit | QLineEdit = QComboBox()
             self.editor.addItem(f"Default ({default})" if default is not None else "Default", None)
             if kind == "bool":
                 self.editor.addItem("True", True)
@@ -62,9 +74,8 @@ class ValueField(QWidget):
         self.setToolTip(tooltip.strip())
 
     def current_matrix(self):
-        value = {"$matrix": True}
-        if self.spec["name"] in {"matrices", "stacks", "aggregates"}:
-            value = [value]
+        entry = {"$matrix": True}
+        value: object = [entry] if self.spec["name"] in {"matrices", "stacks", "aggregates"} else entry
         self.set_value(value)
 
     def browse(self):

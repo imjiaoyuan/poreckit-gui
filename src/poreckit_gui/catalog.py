@@ -62,9 +62,9 @@ def resolve(target):
 @functools.lru_cache(maxsize=1)
 def catalog():
     import poreckit
+    import poreckit.tracks as tracks
     from poreckit.cli import _SUBCOMMANDS
     from poreckit.tracks.base import BaseTrack
-    import poreckit.tracks as tracks
 
     entries = []
     for name in _SUBCOMMANDS:
@@ -161,7 +161,8 @@ def fields(entry):
 
 
 def cli_arguments(name, values):
-    options, positionals = [], []
+    options: list[str] = []
+    positionals: list[str] = []
     for p in cli_command(name).params:
         if p.name not in values or values[p.name] is None:
             continue

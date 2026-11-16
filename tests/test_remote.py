@@ -7,11 +7,11 @@ from urllib.parse import urlsplit
 
 import numpy as np
 import pytest
+from test_sequence import write_bam
 
 from poreckit_gui import remote
 from poreckit_gui.model import Region
-from poreckit_gui.sequenceio import inspect_sequence, alignment_query, reference_sequence, query_sequence
-from test_sequence import write_bam
+from poreckit_gui.sequenceio import alignment_query, inspect_sequence, query_sequence, reference_sequence
 
 
 class Response(io.BytesIO):
@@ -127,8 +127,9 @@ def test_rejects_ignored_ranges_and_wrong_content_range(monkeypatch):
 
 def test_remote_url_session_roundtrip_preserves_sources(server,tmp_path):
     from PySide6.QtWidgets import QApplication
+
     from poreckit_gui.app import Browser
-    app=QApplication.instance() or QApplication([])
+    _app=QApplication.instance() or QApplication([])
     files,_=server
     bam=write_bam(tmp_path)
     files['/reads.bam']=bam.read_bytes()
@@ -159,7 +160,9 @@ def test_remote_url_session_roundtrip_preserves_sources(server,tmp_path):
 
 def test_remote_vcf_tbi_preserves_sample_names_and_interval_edges(server,tmp_path):
     import gzip
+
     from test_sequence import bgzf
+
     from poreckit_gui.sequenceio import interval_records
     files,_=server
     header=b'##fileformat=VCFv4.2\n##contig=<ID=chr1,length=100>\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSample\n'

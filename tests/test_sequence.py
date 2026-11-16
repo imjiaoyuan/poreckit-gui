@@ -9,14 +9,19 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-samtools_required = pytest.mark.skipif(shutil.which('samtools') is None,
-                                       reason='samtools is not installed on this runner')
-
 from poreckit_gui.model import Region
 from poreckit_gui.sequenceio import (
-    BGZF,alignment_query,bam_reads,bigwig_chromsizes,inspect_sequence,
-    interval_records,query_sequence,reference_sequence,version,
+    BGZF,
+    alignment_query,
+    bam_reads,
+    inspect_sequence,
+    interval_records,
+    query_sequence,
+    reference_sequence,
 )
+
+samtools_required = pytest.mark.skipif(shutil.which('samtools') is None,
+                                       reason='samtools is not installed on this runner')
 
 
 def bgzf(data):
@@ -135,6 +140,7 @@ def test_tabix_header_preserves_sample_names(tmp_path):
 
 def test_independent_browser_opens_bam_tracks_exports_and_restores(tmp_path,monkeypatch):
     from PySide6.QtWidgets import QApplication
+
     from poreckit_gui.app import Browser
     from poreckit_gui.dataview import export_scene
     app=QApplication.instance() or QApplication([])
@@ -174,6 +180,7 @@ def test_independent_browser_opens_bam_tracks_exports_and_restores(tmp_path,monk
 
 def test_track_demo_clone_lives_after_original_closes_and_links_loci(tmp_path):
     from PySide6.QtWidgets import QApplication
+
     from poreckit_gui.app import Browser
     app=QApplication.instance() or QApplication([])
     original=Browser()
@@ -366,8 +373,10 @@ def test_cancelling_worker_terminates_external_tools(tmp_path):
     import os
     import sys
     import textwrap
+
     from PySide6.QtCore import QProcess
     from PySide6.QtWidgets import QApplication
+
     from poreckit_gui.jobs import JobProcess
     if os.name != 'posix':
         pytest.skip('process-group cancellation requires POSIX')
@@ -390,7 +399,8 @@ def test_cancelling_worker_terminates_external_tools(tmp_path):
     '''))
     pidfile=tmp_path/'tool.pid'
     job,result=tmp_path/'job.json',tmp_path/'result.json'
-    job.write_text('{}'); result.write_text('')
+    job.write_text('{}')
+    result.write_text('')
     process=JobProcess()
     done=[]
     process.finished.connect(lambda code,status:done.append(code))
@@ -398,23 +408,27 @@ def test_cancelling_worker_terminates_external_tools(tmp_path):
         process.start(sys.executable,[str(script),str(pidfile),str(job),str(result)])
         deadline=time.monotonic()+15
         while not pidfile.exists() and time.monotonic()<deadline:
-            app.processEvents(); time.sleep(.01)
+            app.processEvents()
+            time.sleep(.01)
         tool_pid,worker_group=pidfile.read_text().split()
-        worker_pid=process.processId()
+        _worker_pid=process.processId()
         assert int(worker_group)!=os.getpgrp(),'worker did not get its own process group'
         process.kill()
         deadline=time.monotonic()+15
         while not done and time.monotonic()<deadline:
-            app.processEvents(); time.sleep(.01)
+            app.processEvents()
+            time.sleep(.01)
         assert done
         assert process.child.state()==QProcess.ProcessState.NotRunning
         deadline=time.monotonic()+15
         while 'cleaned' not in pidfile.read_text() and time.monotonic()<deadline:
-            app.processEvents(); time.sleep(.01)
+            app.processEvents()
+            time.sleep(.01)
         assert 'cleaned' in pidfile.read_text(),'worker finally block never ran'
         deadline=time.monotonic()+15
         while tool_pid and Path(f'/proc/{tool_pid}').exists() and time.monotonic()<deadline:
-            app.processEvents(); time.sleep(.01)
+            app.processEvents()
+            time.sleep(.01)
         assert not Path(f'/proc/{tool_pid}').exists(),'external tool survived cancel'
     finally:
         process.shutdown()
@@ -425,7 +439,9 @@ def test_generated_bam_index_is_rebuilt_after_session_restore(tmp_path):
     """Regression: saving dropped the transient generated index and reopening
     failed with 'BAM needs a BAI/CSI index'."""
     import json as jsonlib
+
     from PySide6.QtWidgets import QApplication
+
     from poreckit_gui.app import Browser
     app=QApplication.instance() or QApplication([])
     b=Browser()
@@ -487,7 +503,7 @@ def test_corrupt_or_truncated_bgzf_raises_error_naming_the_file(tmp_path):
 def test_index_with_absurd_counts_is_rejected(tmp_path):
     """Regression: corrupt index headers implying huge allocations must be
     rejected with a clear ValueError instead of huge reads."""
-    from poreckit_gui.sequenceio import chunks, version
+    from poreckit_gui.sequenceio import chunks
     p = write_bam(tmp_path)
     absurd_refs = tmp_path / 'refs.bai'
     absurd_refs.write_bytes(b'BAI\x01' + struct.pack('<i', 20_000_000))

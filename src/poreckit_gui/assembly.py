@@ -42,8 +42,8 @@ class Assembly:
                 continue
             try:
                 if line.startswith('>'):
-                    name,key,length=line[1:].split()
-                    key,length=int(key),int(length)
+                    name,key_text,length_text=line[1:].split()
+                    key,length=int(key_text),int(length_text)
                     if key in fragments:
                         raise ValueError('Duplicate fragment ID')
                     fragments[key]=dict(name=name,length=length,source_name=name,source_start=0,
@@ -223,7 +223,7 @@ class Assembly:
 
     def write_fasta(self,reference,path,gap=0):
         from .model import Region
-        from .sequenceio import reference_sequence,fasta_index,version,chromosome
+        from .sequenceio import chromosome, fasta_index, reference_sequence, version
         # Validate all source coordinates before opening the destination.
         lengths={r[0]:r[1] for r in fasta_index(version(reference))}
         for f in self.fragments.values():
@@ -261,7 +261,7 @@ class Assembly:
 
 def assembly_matrix(assembly,path,start,end,resolution,state=None,max_bins=1500,edges=None):
     """Lift destination bins into bounded source tiles; never query a dense genome."""
-    from .cache import RenderCache,source_chromosome
+    from .cache import RenderCache, source_chromosome
     from .model import Region
     if not 0<=start<end<=assembly.length or resolution<=0:
         raise ValueError('Invalid assembly interval or resolution')
@@ -290,7 +290,7 @@ def assembly_matrix(assembly,path,start,end,resolution,state=None,max_bins=1500,
             if not cool or not choices:
                 raise ValueError('Preview resolution must use a stored source resolution or a coarser Cooler resolution')
             return sparse_cool_assembly(assembly,path,edges,max(choices))
-        groups={}
+        groups: dict = {}
         for f in assembly.layout():
             lo,hi=max(start,f['start']),min(end,f['end'])
             if hi<=lo:
@@ -349,14 +349,15 @@ def assembly_matrix(assembly,path,start,end,resolution,state=None,max_bins=1500,
 
 
 def render_assembly(job,state=None):
+    import matplotlib
+
     from .contactview import ContactPanel
     from .model import Region
-    import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
     from poreckit.layout.style import register_hic_colormaps
     register_hic_colormaps()
-    from .mapdata import save_map_data,svg_plot_bounds
+    from .mapdata import save_map_data, svg_plot_bounds
     assembly=Assembly.restore(job['assembly'])
     start,end,resolution=job['start'],job['end'],job['resolution']
     matrix=assembly_matrix(assembly,job['input'],start,end,resolution,state)
@@ -386,18 +387,19 @@ def render_assembly(job,state=None):
 
 def export_cool(assembly,source,path,resolution,state=None):
     """Write a bounded, corrected Cooler with real superscaffold boundaries."""
-    import h5py
     import json
+
+    import h5py
     lengths=[sum(assembly.fragments[abs(v)]['length'] for v in group) for group in assembly.groups]
     edges=[0]
     chrom,start,end=[],[],[]
     offset=0
     for i,length in enumerate(lengths):
-        for a in range(0,length,resolution):
+        for pos in range(0,length,resolution):
             chrom.append(i)
-            start.append(a)
-            end.append(min(a+resolution,length))
-            edges.append(offset+min(a+resolution,length))
+            start.append(pos)
+            end.append(min(pos+resolution,length))
+            edges.append(offset+min(pos+resolution,length))
         offset+=length
     if len(chrom)>2500:
         raise ValueError('Corrected map export exceeds 2500 bins; choose a coarser stored resolution')
@@ -454,13 +456,14 @@ def export_assembly(job,state=None):
 def sparse_cool_assembly(assembly,path,edges,source_resolution):
     """Stream sparse Cooler pixels for overviews spanning many source contigs."""
     import h5py
+
     from .sequenceio import chromosome
     n=len(edges)-1
     src_ids,dest_ids,weights=[],[],[]
     with h5py.File(path,'r') as file:
         g=file[f'resolutions/{source_resolution}'] if 'resolutions' in file else file
         names=[v.decode() if isinstance(v,bytes) else str(v) for v in g['chroms/name'][:]]
-        lengths=dict(zip(names,map(int,g['chroms/length'][:])))
+        lengths=dict(zip(names,map(int,g['chroms/length'][:]),strict=False))
         offsets=g['indexes/chrom_offset'][:]
         for f in assembly.layout():
             lo,hi=max(int(edges[0]),f['start']),min(int(edges[-1]),f['end'])
@@ -487,9 +490,9 @@ def sparse_cool_assembly(assembly,path,edges,source_resolution):
                     if len(src_ids)>2_000_000:
                         raise ValueError('Assembly overview exceeds two million source overlaps; use a coarser source map')
         order=np.argsort(src_ids,kind='stable')
-        src_ids=np.asarray(src_ids,dtype=np.int64)[order]
-        dest_ids=np.asarray(dest_ids,dtype=np.int64)[order]
-        weights=np.asarray(weights,dtype=np.float32)[order]
+        src_arr=np.asarray(src_ids,dtype=np.int64)[order]
+        dest_arr=np.asarray(dest_ids,dtype=np.int64)[order]
+        weights_arr=np.asarray(weights,dtype=np.float32)[order]
         result=np.zeros((n,n),dtype=np.float32)
         storage=g.attrs.get('storage-mode','symmetric-upper')
         if isinstance(storage,bytes):
@@ -501,8 +504,8 @@ def sparse_cool_assembly(assembly,path,edges,source_resolution):
             b=g['pixels/bin2_id'][at:at+262144]
             values=np.asarray(g['pixels/count'][at:at+262144],dtype=np.float32)
             values[a==b]*=2
-            left_a,right_a=np.searchsorted(src_ids,a,'left'),np.searchsorted(src_ids,a,'right')
-            left_b,right_b=np.searchsorted(src_ids,b,'left'),np.searchsorted(src_ids,b,'right')
+            left_a,right_a=np.searchsorted(src_arr,a,'left'),np.searchsorted(src_arr,a,'right')
+            left_b,right_b=np.searchsorted(src_arr,b,'left'),np.searchsorted(src_arr,b,'right')
             valid=(right_a>left_a)&(right_b>left_b)&np.isfinite(values)
             a,b,values=a[valid],b[valid],values[valid]
             left_a,right_a,left_b,right_b=left_a[valid],right_a[valid],left_b[valid],right_b[valid]
@@ -510,8 +513,8 @@ def sparse_cool_assembly(assembly,path,edges,source_resolution):
                 for j in range(int(np.max(right_b-left_b,initial=0))):
                     selected=(left_a+i<right_a)&(left_b+j<right_b)
                     ai,bi=left_a[selected]+i,left_b[selected]+j
-                    x,y=dest_ids[ai],dest_ids[bi]
-                    counts=values[selected]*weights[ai]*weights[bi]
+                    x,y=dest_arr[ai],dest_arr[bi]
+                    counts=values[selected]*weights_arr[ai]*weights_arr[bi]
                     np.add.at(result,(y,x),counts)
                     if storage=='symmetric-upper':
                         off=a[selected]!=b[selected]

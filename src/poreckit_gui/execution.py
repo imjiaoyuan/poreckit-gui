@@ -23,7 +23,8 @@ class FigureCollector:
             return
         self.figures.append(fig)
         number = len(self.figures)
-        title = fig._suptitle.get_text() if fig._suptitle is not None else ""
+        suptitle = getattr(fig, "_suptitle", None)  # private matplotlib attribute
+        title = suptitle.get_text() if suptitle is not None else ""
         if not title:
             title = next((ax.get_title() or ax.get_title(loc="left") for ax in fig.axes
                           if ax.get_title() or ax.get_title(loc="left")), f"Figure {number}")
@@ -97,7 +98,8 @@ def execute_plot(job):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from poreckit import Canvas
-    from .catalog import catalog, cli_command, cli_arguments, output_options, resolve
+
+    from .catalog import catalog, cli_arguments, cli_command, output_options, resolve
 
     directory = Path(job["directory"]).resolve()
     directory.mkdir(parents=True, exist_ok=True)

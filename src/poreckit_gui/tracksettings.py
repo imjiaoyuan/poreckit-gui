@@ -1,9 +1,16 @@
 """Per-track display options for the guided genome browser."""
 from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QDialog, QVBoxLayout, QFormLayout, QLineEdit, QComboBox,
-                              QDoubleSpinBox, QDialogButtonBox, QMessageBox)
+from PySide6.QtWidgets import (
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QDoubleSpinBox,
+    QFormLayout,
+    QLineEdit,
+    QMessageBox,
+    QVBoxLayout,
+)
 
 
 class TrackSettings(QDialog):
@@ -67,11 +74,12 @@ class TrackSettings(QDialog):
             form.addRow("Colormap", self.cmap)
             form.addRow("Resolution / bp", self.resolution)
             form.addRow("Normalization", self.norm)
-        self.height = QDoubleSpinBox()
-        self.height.setRange(0.1, 4)
-        self.height.setSingleStep(0.1)
-        self.height.setValue(float(track.get("height", 1.0 if track["kind"] == "contacts" else 0.3)))
-        form.addRow("Relative panel height", self.height)
+        # Named to avoid clashing with QDialog.height(); the spin box edits the track's relative height.
+        self.height_box = QDoubleSpinBox()
+        self.height_box.setRange(0.1, 4)
+        self.height_box.setSingleStep(0.1)
+        self.height_box.setValue(float(track.get("height", 1.0 if track["kind"] == "contacts" else 0.3)))
+        form.addRow("Relative panel height", self.height_box)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
@@ -84,7 +92,7 @@ class TrackSettings(QDialog):
             return
         self.track.update(name=self.name.text().strip() or Path(self.track["path"]).name,
                           style=self.mode.currentData(), placement=self.placement.currentData(),
-                          color=self.color.text(), height=self.height.value())
+                          color=self.color.text(), height=self.height_box.value())
         self.track["chrom"] = self.chrom.text().strip()
         self.track["chrom_y"] = self.chrom_y.text().strip()
         if self.track["kind"] == "contacts":

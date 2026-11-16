@@ -5,7 +5,6 @@ packages. CRAM and BCF use samtools/bcftools, with argument arrays only.
 """
 from __future__ import annotations
 
-import bisect
 import gzip
 import json
 import math
@@ -15,9 +14,10 @@ import subprocess
 import zlib
 from functools import lru_cache
 from pathlib import Path
-from .remote import is_remote, open_binary, identity, exists, sidecar, source_path
 
 import numpy as np
+
+from .remote import exists, identity, is_remote, open_binary, sidecar, source_path
 
 MAX_RECORDS = 100_000
 BASES = '=ACMGRSVTWYHKDBN'
@@ -222,7 +222,7 @@ def chunks(index, ref, start, end):
         for key, values in refs[ref].items():
             if lo <= key <= hi:
                 selected.extend(values)
-    result = []
+    result: list[tuple] = []
     for a, b in sorted(selected):
         if result and a <= result[-1][1]:
             result[-1] = (result[-1][0], max(b, result[-1][1]))
@@ -276,7 +276,7 @@ def read_geometry(start, cigar):
 
 
 def bam_tags(data):
-    tags={}
+    tags: dict[str, object] = {}
     at=0
     formats={'c':('b',1),'C':('B',1),'s':('h',2),'S':('H',2),'i':('i',4),'I':('I',4),'f':('f',4),'d':('d',8)}
     while at<len(data):
@@ -286,7 +286,7 @@ def bam_tags(data):
         kind=chr(data[at+2])
         at+=3
         if kind=='A':
-            value=chr(data[at])
+            value: object = chr(data[at])
             at+=1
         elif kind in formats:
             fmt,size=formats[kind]
@@ -379,13 +379,15 @@ def tool_output(tool, args):
     import tempfile
     with tempfile.TemporaryFile() as errors:
         p = subprocess.Popen([program, *args], stdout=subprocess.PIPE, stderr=errors, text=True)
+        lines = p.stdout
+        assert lines is not None  # stdout=PIPE always yields a stream
         try:
-            yield from p.stdout
+            yield from lines
             if p.wait() != 0:
                 errors.seek(0)
                 raise ValueError(errors.read(16000).decode('utf8', 'replace'))
         finally:
-            p.stdout.close()
+            lines.close()
             if p.poll() is None:
                 p.terminate()
                 try:
@@ -712,7 +714,7 @@ def interval_records(track, region, limit=MAX_RECORDS):
                     continue
                 fmt = c[8].split(':') if len(c)>8 else []
                 record = dict(start=start,end=end,name=c[2],ref=c[3],alt=c[4],qual=c[5],filter=c[6],info=info,
-                              samples={samples[i] if i<len(samples) else str(i+1):dict(zip(fmt,v.split(':'))) for i,v in enumerate(c[9:])})
+                              samples={samples[i] if i<len(samples) else str(i+1):dict(zip(fmt,v.split(':'),strict=False)) for i,v in enumerate(c[9:])})
             else:
                 start, end = (int(c[3])-1,int(c[4])) if kind=='genes' else (int(c[1]),int(c[2]))
                 if end <= region.start or start >= region.end:
@@ -724,7 +726,7 @@ def interval_records(track, region, limit=MAX_RECORDS):
                     starts=list(map(int,c[11].rstrip(',').split(',')))
                     if len(sizes)!=int(c[9]) or len(starts)!=int(c[9]):
                         raise ValueError('BED12 block count does not match block coordinates')
-                    record['blocks']=[[start+a,start+a+n] for a,n in zip(starts,sizes)]
+                    record['blocks']=[[start+a,start+a+n] for a,n in zip(starts,sizes,strict=False)]
             result.append(record)
             if len(result) > limit:
                 return dict(records=result[:limit],truncated=True,scanned=scanned)
@@ -742,14 +744,15 @@ def alignment_query(track, region, bins, reference=''):
     elif source_path(track['path']).lower().endswith('.cram'):
         reads = cram_reads(track['path'],region,options)
     else:
-        reads = (sam_record(l) for l in text_lines(track['path']) if not l.startswith('@'))
+        reads = (sam_record(raw) for raw in text_lines(track['path']) if not raw.startswith('@'))
     coverage = np.zeros(bins,dtype=float)
     delta = np.zeros(bins+1,dtype=float)
     import random
     random_source=random.Random(0)
     record_limit=max(0,int(track.get('record_limit',0)))
-    junctions={}
-    selected, seen, accepted, truncated = [],0,0,False
+    junctions: dict = {}
+    selected: list = []
+    seen, accepted, truncated = 0,0,False
     excluded = 4 | (0 if track.get('duplicates') else 1024) | (0 if track.get('secondary') else 256) | (0 if track.get('supplementary',True) else 2048) | 512
     max_reads = min(10000,max(1,int(track.get('max_reads',1000))))
     span = region.end-region.start
@@ -813,7 +816,7 @@ def query_sequence(job, state=None):
         except (ValueError,OSError) as exc:
             reference_error=str(exc)
     result = dict(region=region.text(),sequence=sequence,tracks=[],reference=reference,reference_error=reference_error)
-    shared = {}
+    shared: dict = {}
     for track in job['tracks']:
         if not track.get('visible',True) or track['kind']=='reference':
             continue
@@ -848,7 +851,7 @@ def query_sequence(job, state=None):
                          version(reference) if reference else None,
                          version(track['index']) if track.get('index') else None,
                          tuple((k,track.get(k,default)) for k,default in defaults.items()))
-                    data=state.sequence_payload(key,lambda:alignment_query(track,region,bins,reference))
+                    data=state.sequence_payload(key,lambda track=track:alignment_query(track,region,bins,reference))
             else:
                 data=interval_records(track,region,limit=10000)
                 if track['kind']=='genes':

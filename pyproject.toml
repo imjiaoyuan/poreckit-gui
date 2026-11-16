@@ -13,11 +13,30 @@ dependencies = ["PySide6-Essentials>=6.8,<7", "poreckit"]
 poreckit-gui = "poreckit_gui.app:main"
 
 [dependency-groups]
-dev = ["pytest>=8", "pyyaml>=6,<7"]
+dev = ["pytest>=8", "pyyaml>=6,<7", "ruff>=0.8", "mypy>=1.13"]
 build = ["pyinstaller>=6.16,<7"]
 
 [tool.uv.sources]
 poreckit = { path = "../poreckit" }
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = [
+    "E501",  # long lines in embedded help text and labels
+]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_incremental = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
