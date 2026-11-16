@@ -2,7 +2,7 @@
 
 A native **PySide6 / Qt Widgets** genome browser for the sibling
 [`poreckit`](../poreckit) library. One Python UI for Windows, Linux and macOS.
-It includes a focused genome browser and a full poreckit plotting workbench.
+It includes a focused genome browser, a track/alignment viewer, an assembly editor and a full poreckit plotting workbench.
 
 ## Run
 
@@ -79,11 +79,14 @@ uv sync --reinstall-package poreckit
   equivalent prefix when the exact chromosome is absent.
   Axis-side tracks share the matrix coordinates and keep signal values intact
   when rotated; the two orientations reuse the same underlying data query.
+- Load a second contact file with **File → Load control map…** to unlock split, difference and ratio views against it, including observed/expected modes that use each file's own expected curves.
+- **View → Whole-genome overview…** (`Ctrl+G`) aggregates contacts across the whole genome; click a chromosome pair to open it in the browser.
+- The **Window** menu opens additional browser windows, duplicates the current view, and can link loci across windows so navigation stays synchronized.
+- **File → Export matrix data…** saves the displayed square map as NPZ with the observed and displayed arrays, the optional control matrix and coordinate metadata.
 - Export PNG, PDF or SVG. Save/open JSON sessions to retain settings and
   references to data files. Relative paths resolve against the session file;
   data files are not copied. Demo data is temporary and is not session-persistent.
-- Try **File → Open synthetic demo** without external datasets. These counts
-  are synthetic and have no biological meaning.
+- Try **File → Open synthetic demo** without external datasets. These counts are synthetic and have no biological meaning. **Open synthetic track demo** fills the Tracks / alignments tab with example files.
 
 The UI follows the desktop's Qt style, fonts and palette, without a custom
 stylesheet. Qt is cross-platform; it does not use GTK-native widgets on GNOME.
@@ -93,10 +96,7 @@ The interface uses locus navigation, editable track lists and a shared genomic v
 
 ## Scope and limitations
 
-The **Genome Browser** tab supports a primary contact map and additional aligned
-contact/annotation panels. The **Plot
-Workbench** tab exposes every plotting command, public plotting function and
-exported track type in the installed poreckit version. The current catalog has
+The **Genome Browser** tab supports a primary contact map and additional aligned contact/annotation panels. The **Tracks / alignments** tab browses signal, alignment, variant, reference and annotation files at its own locus. The **Assembly editor** tab reorders, cuts, joins and inverts scaffolds with automatic coordinate lifting and a live remapped contact-map preview. The **Plot Workbench** tab exposes every plotting command, public plotting function and exported track type in the installed poreckit version. The current catalog has
 **30 commands, 84 functions and 38 track constructors** (including GC and
 restriction-site helpers). [Full catalog](docs/plot-catalog.md).
 
@@ -106,6 +106,12 @@ and aggregate figures, alignment/coverage/sashimi tracks, and the other
 poreckit plot families. Non-plotting data-management commands are excluded.
 Gene-name search uses local GTF/GFF/BED annotations. Genome data is not downloaded automatically.
 Files lacking chromosome lengths need an explicit locus.
+
+## Tracks and assemblies
+
+**File → Open genomic tracks…** loads bigWig/bedGraph signals, BAM/CRAM/SAM alignments, FASTA references, VCF/BCF variants and GTF/GFF/BED files into the **Tracks / alignments** tab. The tab has its own locus field, per-track display options and track-session save/open. **File → Open remote track…** reads bigWig, BAM, VCF and FASTA directly over HTTP(S) with byte-range requests; an optional custom index URL (BAI/CSI/TBI) is supported.
+
+The **Assembly editor** tab starts from the loaded contact map or an imported `.assembly` text file. Scaffolds can be dragged, moved, cut, split, joined and inverted with undo/redo; positions lift automatically and the preview re-queries the source contacts for the edited layout, bounded so very large layouts must zoom to a smaller region first. Projects save and reopen with their source mapping. **Export** writes the edited layout as `.assembly` text, AGP, corrected FASTA, a corrected contact map (`.cool`) or a map image, and never overwrites the source contact file.
 
 ## Plot Workbench
 
