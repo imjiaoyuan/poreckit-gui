@@ -84,18 +84,31 @@ class RenderCache:
         return result
 
     def version(self, path):
+        from .remote import identity, is_remote
+        if is_remote(path):
+            # URLs have no stat(): the remote identity (url, size, ETag,
+            # Last-Modified, local cache generation) plays the same role, so
+            # server-side changes invalidate reader and matrix caches.
+            return tuple(identity(str(path)))
         path = Path(path).resolve()
         stat = path.stat()
         return str(path), stat.st_mtime_ns, stat.st_size, stat.st_ino
 
-    def reader(self, path):
+    def _make_reader(self, path):
+        from .remote import is_remote
+        if is_remote(path):
+            from .remotehic import RemoteHicReader
+            return RemoteHicReader(str(path))
         from poreckit import make_reader
+        return make_reader(str(path))
+
+    def reader(self, path):
         version = self.version(path)
         for key in list(self.readers):
             if key[0] == version[0] and key != version:
                 self._close(self.readers.pop(key))
         if version not in self.readers:
-            reader = make_reader(str(path))
+            reader = self._make_reader(path)
             if hasattr(reader, "cache_bytes"):
                 reader.cache_bytes = 16 * 1024**2
             self.readers[version] = reader
@@ -132,9 +145,21 @@ class RenderCache:
             return self.matrix(path, x.chrom, x.start, x.end, resolution, norm)
         key = (self.version(path), "rectangle", x, y, resolution, norm)
         def compute():
+            import math
             reader = self.reader(path)
-            return reader.matrix(source_chromosome(reader, y.chrom), y.start, y.end, resolution, norm,
-                                 chrom2=source_chromosome(reader, x.chrom), start2=x.start, end2=x.end)
+            source_x, source_y = source_chromosome(reader, x.chrom), source_chromosome(reader, y.chrom)
+            if source_x == source_y:
+                # Intra-chromosomal sub-block: readers reject a chrom2 that
+                # equals chrom1, so fetch the enclosing span once and slice.
+                lo, hi = min(x.start, y.start), max(x.end, y.end)
+                block = self.matrix(path, y.chrom, lo, hi, resolution, norm)
+                rows = (y.start - lo) // resolution
+                cols = (x.start - lo) // resolution
+                shape = (math.ceil((y.end - y.start) / resolution),
+                         math.ceil((x.end - x.start) / resolution))
+                return block[rows:rows + shape[0], cols:cols + shape[1]]
+            return reader.matrix(source_y, y.start, y.end, resolution, norm,
+                                 chrom2=source_x, start2=x.start, end2=x.end)
         return self._load(key, compute)
 
     def symmetric(self, path, resolution):
@@ -146,7 +171,7 @@ class RenderCache:
             name = str(path).lower()
             # .hic only stores the upper triangle, so symmetry is guaranteed;
             # cooler defaults to symmetric-upper unless a group says 'square'.
-            symmetric = name.endswith(".hic")
+            symmetric = name.endswith((".hic", ".pairs", ".pairs.gz", ".parquet"))
             if name.endswith((".cool", ".mcool", ".h5")):
                 import h5py
                 try:
@@ -161,15 +186,26 @@ class RenderCache:
                 self.storage_cache.popitem(last=False)
         return self.storage_cache[key]
 
+    def tile_chromsizes(self, path, reader):
+        """Chromosome lengths for tile clipping: the reader's table when the
+        format carries one, otherwise the file metadata (`.pairs` headers
+        carry `#chromsize:`; `.parquet` lengths are derived by the metadata
+        position scan)."""
+        if hasattr(reader, "chromsizes"):
+            return dict(reader.chromsizes())
+        return {str(n): int(s) for n, s in self.metadata(path).get("chromsizes", [])}
+
     def tiled_rectangle(self, path, x, y, resolution, norm=None, tile_bins=128):
         """Reuse aligned source tiles across overlapping genomic viewports."""
         import math
+
         import numpy as np
+
         from .model import Region
         reader = self.reader(path)
-        if not hasattr(reader, "chromsizes") or x.start % resolution or y.start % resolution:
+        lengths = self.tile_chromsizes(path, reader)
+        if not lengths or x.start % resolution or y.start % resolution:
             return self.rectangle(path, x, y, resolution, norm)
-        lengths = dict(reader.chromsizes())
         def axis(region):
             name = source_chromosome(reader, region.chrom)
             length = lengths[name]
@@ -179,10 +215,15 @@ class RenderCache:
         key = (self.version(path), "tiled-view", x, y, resolution, norm)
         symmetric = self.symmetric(path, resolution)
         def compute():
-            result = np.empty((math.ceil((y.end-y.start)/resolution),
+            # Zero-filled, not empty: tiles clipped by the chromosome length
+            # (shorter than the queried span) leave untouched cells that must
+            # read as "no contact", matching the direct query's zero bins.
+            result = np.zeros((math.ceil((y.end-y.start)/resolution),
                                math.ceil((x.end-x.start)/resolution)), dtype=np.float32)
             for tx in axis(x):
                 for ty in axis(y):
+                    if tx.end <= tx.start or ty.end <= ty.start:
+                        continue
                     # Only symmetric source tiles may share one cache entry.
                     transpose = symmetric and (tx.chrom, tx.start) > (ty.chrom, ty.start)
                     block = self.rectangle(path, ty, tx, resolution, norm).T if transpose else self.rectangle(path, tx, ty, resolution, norm)
@@ -194,18 +235,26 @@ class RenderCache:
                     src_y = slice((ya-ty.start)//resolution, math.ceil((yb-ty.start)/resolution))
                     result[dest_y, dest_x] = block[src_y, src_x]
             return result
-        return self._load(key, compute)
+        try:
+            return self._load(key, compute)
+        except Exception:
+            # A tile the source cannot answer (pairs/parquet readers expose
+            # no inter-chromosomal query) degrades to the direct rectangle
+            # query instead of failing the tiled path; if that query is
+            # unsupported too, its own error surfaces unchanged.
+            return self.rectangle(path, x, y, resolution, norm)
 
     def records(self, kind, path, chrom=None):
         """Reuse public annotation parsers while tracking their Python heap size."""
-        from poreckit import parse_genes, parse_tads, parse_loops
+        from poreckit import parse_genes, parse_loops, parse_tads
         key = self.version(path), kind, chrom
         if key in self.records_cache:
             self.records_cache.move_to_end(key)
             self._touch("records_cache", key)
             return self.records_cache[key][0]
         path = str(path)
-        same = lambda name: name.removeprefix("chr") == chrom.removeprefix("chr")
+        def same(name):
+            return name.removeprefix("chr") == chrom.removeprefix("chr")
         if kind == "genes":
             values = parse_genes(path, chrom)
             if not values:

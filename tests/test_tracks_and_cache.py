@@ -161,6 +161,7 @@ def test_tiled_rectangle_matches_directed_queries_on_square_storage(tmp_path):
     """Regression: symmetric tile sharing once transposed asymmetric
     square-storage matrices and silently changed displayed and hover values."""
     from poreckit import make_reader
+
     from poreckit_gui.model import Region
     path = write_square_storage_cooler(tmp_path / "asymmetric.cool")
     state = RenderCache()
@@ -179,7 +180,7 @@ def test_tiled_rectangle_matches_directed_queries_on_square_storage(tmp_path):
         direct = rd.matrix("chr1", 0, 2000000, 10000, None, chrom2="chr2", start2=0, end2=1200000)
         np.testing.assert_allclose(tiled, direct)
     finally:
-        rd.close()
+        (rd.close() if hasattr(rd, "close") else None)
         state.close()
 
 
@@ -190,6 +191,7 @@ def test_tiled_rectangle_matches_direct_matrix_across_query_shapes(tmp_path, squ
     intra-chromosomal and inter-chromosomal queries, for symmetric and
     directed square storage alike."""
     from poreckit import make_reader
+
     from poreckit_gui.model import Region
     if square:
         path = write_square_storage_cooler(tmp_path / "asymmetric.cool", n1=260, n2=120)
@@ -270,6 +272,7 @@ def test_triangle_signed_display_keeps_negative_values(tmp_path, display_mode, e
 
 def patch_savefig(inspect):
     import contextlib
+
     from matplotlib.figure import Figure
     @contextlib.contextmanager
     def context():
@@ -293,6 +296,7 @@ def test_catalog_text_carries_no_tool_branding():
 
 def test_sparse_signal_bins_remain_visible_without_filling_missing_data():
     import matplotlib.pyplot as plt
+
     from poreckit_gui.tracks import SignalPanel
     values = np.array([np.nan, 5.0, np.nan])
     fig, ax = plt.subplots()
@@ -307,8 +311,9 @@ def test_sparse_signal_bins_remain_visible_without_filling_missing_data():
 
 def test_track_settings_preserve_independent_modes():
     from PySide6.QtWidgets import QApplication, QDialog
+
     from poreckit_gui.tracksettings import TrackSettings
-    app = QApplication.instance() or QApplication([])
+    _app = QApplication.instance() or QApplication([])
     dialog = TrackSettings(dict(kind="contacts", path="sample.cool", style="triangle", placement="panel"))
     dialog.mode.setCurrentIndex(dialog.mode.findData("square"))
     dialog.resolution.setText("5000")
@@ -324,6 +329,7 @@ def test_track_settings_preserve_independent_modes():
 
 def test_gui_reuses_worker_and_reset_keeps_data_selection(tmp_path):
     from PySide6.QtWidgets import QApplication
+
     from poreckit_gui.app import Browser
     app = QApplication.instance() or QApplication([])
     browser = Browser()
@@ -364,6 +370,7 @@ def test_gui_reuses_worker_and_reset_keeps_data_selection(tmp_path):
 
 def test_contact_tiles_reuse_overlaps_and_match_rectangular_data(tmp_path):
     from poreckit import make_reader
+
     from poreckit_gui.model import Region
     path=create_demo(tmp_path, [('chr1',4000000),('chr2',2500000)])
     state=RenderCache()
@@ -394,6 +401,7 @@ def test_browser_previews_are_reaped_during_the_session(tmp_path):
     """Regression: every navigation once added preview/job/result files that
     were only removed at shutdown."""
     from PySide6.QtWidgets import QApplication
+
     from poreckit_gui.app import Browser
     app = QApplication.instance() or QApplication([])
     browser = Browser()
@@ -417,7 +425,7 @@ def test_browser_previews_are_reaped_during_the_session(tmp_path):
         wait_until(lambda: browser.last_view is not None and not browser.busy())
         for cmap in ("viridis", "inferno", "magma"):
             browser.cmap.setCurrentText(cmap)
-            wait_until(lambda: browser.last_view["cmap"] == cmap and not browser.busy())
+            wait_until(lambda cmap=cmap: browser.last_view["cmap"] == cmap and not browser.busy())
         serials = {int(re.search(r"-(\d+)", name).group(1)) for name in numbered()}
         assert serials <= {browser.serial, browser.serial - 1}, numbered()
         assert browser.last_files["svg"]
@@ -430,6 +438,7 @@ def test_shared_budget_across_matrices_records_and_payloads(tmp_path, monkeypatc
     """Regression: matrices, records and payloads must share ONE max_bytes
     budget; combined use may never reach 1.75x max_bytes anymore."""
     import json
+
     import poreckit
     tads = tmp_path / "domains.bed"
     tads.write_text("chr1\t100\t400\tT1\n")
@@ -463,3 +472,113 @@ def test_shared_budget_across_matrices_records_and_payloads(tmp_path, monkeypatc
     finally:
         state.close()
     assert not state.order and state.bytes == state.record_bytes == state.payload_bytes == 0
+
+
+def write_pairs_fixture(path, length1=4_000_000, length2=2_500_000):
+    """Small 4DN .pairs file with diagonal, off-diagonal intra- and
+    inter-chromosomal contacts (unordered pairs appear in both orders)."""
+    header = [f"#chromsize: chr1 {length1}", f"#chromsize: chr2 {length2}",
+              "#columns readID chrom1 pos1 chrom2 pos2 strand1 strand2"]
+    pairs = [
+        ("r1", "chr1", 150000, "chr1", 350000),
+        ("r2", "chr1", 350000, "chr1", 150000),    # same contact, reversed
+        ("r3", "chr1", 1500000, "chr1", 2500000),  # off-diagonal intra
+        ("r4", "chr2", 1000000, "chr2", 1600000),  # off-diagonal intra
+        ("r5", "chr1", 150000, "chr2", 900000),    # inter-chromosomal
+        ("r6", "chr1", 300000, "chr1", 1800000),   # spans the off-diagonal windows
+        ("r7", "chr2", 300000, "chr2", 2000000),   # same, on chr2
+    ]
+    with open(path, "w") as handle:
+        handle.write("\n".join(header) + "\n")
+        for row in pairs:
+            handle.write("\t".join(map(str, row)) + "\t+\t-\n")
+    return str(path)
+
+
+@pytest.mark.parametrize("suffix", [".pairs", ".pairs.gz"], ids=["plain", "gzip"])
+def test_tiled_rectangle_matches_untiled_path_on_pairs(tmp_path, suffix):
+    """Pair sources are inherently symmetric and resolution-free, so the
+    tile cache must reproduce the untiled rectangle for diagonal,
+    off-diagonal intra-chromosomal queries and share transposed tiles."""
+    import gzip as gzip_module
+
+    from poreckit import make_reader
+
+    from poreckit_gui.model import Region
+    target = tmp_path / f"contacts{suffix}"
+    text = write_pairs_fixture(tmp_path / "plain.pairs")
+    if suffix == ".pairs.gz":
+        with open(text) as source, gzip_module.open(target, "wt") as sink:
+            sink.write(source.read())
+    else:
+        target.write_text(Path(text).read_text())
+    resolution = 10000
+    queries = [
+        # Diagonal (x == y), spanning several 1.28 Mbp tiles.
+        (Region("chr1", 0, 2000000), Region("chr1", 0, 2000000)),
+        # Off-diagonal intra-chromosomal, crossing tile boundaries.
+        (Region("chr1", 0, 1280000), Region("chr1", 640000, 2560000)),
+        (Region("chr2", 0, 2500000), Region("chr2", 0, 2500000)),
+    ]
+    state = RenderCache()
+    rd = make_reader(str(target))
+    try:
+        assert state.symmetric(str(target), resolution) is True
+        assert [tuple(c) for c in state.metadata(str(target))["chromsizes"]] == \
+            [("chr1", 4000000), ("chr2", 2500000)]
+        for x, y in queries:
+            tiled = state.tiled_rectangle(str(target), x, y, resolution)
+            untiled = state.rectangle(str(target), x, y, resolution)
+            assert tiled.shape == untiled.shape
+            np.testing.assert_allclose(tiled, untiled)
+            assert tiled.sum() > 0, "fixture must place contacts inside the query"
+            if x != y:
+                np.testing.assert_allclose(
+                    state.tiled_rectangle(str(target), y, x, resolution), tiled.T)
+        # Inter-chromosomal: pairs readers have no chrom2 query, so the tile
+        # path degrades to the untiled rectangle and raises the same error.
+        x = Region("chr1", 0, 2000000)
+        y = Region("chr2", 0, 2500000)
+        with pytest.raises(ValueError, match="intra-chromosomal"):
+            state.rectangle(str(target), x, y, resolution)
+        with pytest.raises(ValueError, match="intra-chromosomal"):
+            state.tiled_rectangle(str(target), x, y, resolution)
+    finally:
+        (rd.close() if hasattr(rd, "close") else None)
+        state.close()
+
+
+def test_tiled_rectangle_matches_untiled_path_on_parquet(tmp_path):
+    """Parquet concatemer tables behave like pairs through the tile cache;
+    chromosome lengths come from the metadata position scan, so queries stay
+    inside the observed spans."""
+    from poreckit import make_reader, parse_pairs, write_parquet
+
+    from poreckit_gui.model import Region
+    pairs = write_pairs_fixture(tmp_path / "contacts.pairs")
+    target = str(tmp_path / "contacts.parquet")
+    write_parquet(parse_pairs(pairs, None), target)
+    resolution = 10000
+    queries = [
+        (Region("chr1", 0, 1000000), Region("chr1", 0, 1000000)),
+        (Region("chr1", 0, 1280000), Region("chr1", 640000, 2560000)),
+        (Region("chr2", 0, 1700000), Region("chr2", 0, 1700000)),
+    ]
+    state = RenderCache()
+    rd = make_reader(target)
+    try:
+        assert state.symmetric(target, resolution) is True
+        assert [tuple(c) for c in state.metadata(target)["chromsizes"]] == \
+            [("chr1", 2500001), ("chr2", 2000001)]
+        for x, y in queries:
+            tiled = state.tiled_rectangle(target, x, y, resolution)
+            untiled = state.rectangle(target, x, y, resolution)
+            assert tiled.shape == untiled.shape
+            np.testing.assert_allclose(tiled, untiled)
+            assert tiled.sum() > 0
+        with pytest.raises(ValueError, match="intra-chromosomal"):
+            state.tiled_rectangle(target, Region("chr1", 0, 1000000),
+                                  Region("chr2", 0, 1000000), resolution)
+    finally:
+        (rd.close() if hasattr(rd, "close") else None)
+        state.close()

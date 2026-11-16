@@ -5,14 +5,15 @@ import io
 import re
 import time
 from collections import OrderedDict
+from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 BLOCK_SIZE = 256 * 1024
 CACHE_BYTES = 64 * 1024 * 1024
-_cache = OrderedDict()
-_metadata = {}
+_cache: OrderedDict[tuple, Any] = OrderedDict()
+_metadata: dict[str, Any] = {}
 _cache_size = 0
 
 

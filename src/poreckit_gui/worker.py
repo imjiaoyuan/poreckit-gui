@@ -9,8 +9,13 @@ from pathlib import Path
 
 
 def inspect_file(path):
-    from poreckit import make_reader
-    reader = make_reader(path)
+    from .remote import is_remote
+    if str(path).lower().endswith(".hic") and is_remote(path):
+        from .remotehic import RemoteHicReader
+        reader = RemoteHicReader(path)
+    else:
+        from poreckit import make_reader
+        reader = make_reader(path)
     try:
         resolutions = [int(n) for n in reader.resolutions()]
         normalizations = {}
@@ -50,6 +55,17 @@ def inspect_file(path):
                     if line.startswith("#chromsize:"):
                         _, chrom, length = line.split()
                         chroms.append((chrom, int(length)))
+        elif path.lower().endswith(".parquet"):
+            # The parquet table stores no chromsize header, so derive
+            # chromosome extents from the observed fragment positions. One
+            # full scan, cached per file version by the metadata cache.
+            from poreckit import parse_parquet
+            sizes = {}
+            for _read_id, fragments in parse_parquet(path, None):
+                for chrom, pos, *_rest in fragments:
+                    if pos + 1 > sizes.get(chrom, 0):
+                        sizes[chrom] = pos + 1
+            chroms = sorted(sizes.items())
         if isinstance(assembly, bytes):
             assembly = assembly.decode()
         return {"input": path, "resolutions": resolutions, "normalizations": normalizations, "assembly": assembly,
@@ -65,14 +81,14 @@ def render(view, output, capture_formats=False, state=None):
     import matplotlib.pyplot as plt
     import numpy as np
     from matplotlib.ticker import FuncFormatter
-    from poreckit import (Canvas, TrackHeatmap, TrackGene,
-                          TrackTAD, TrackLoop, TrackXAxis, make_reader)
+    from poreckit import Canvas, TrackGene, TrackHeatmap, TrackLoop, TrackTAD, TrackXAxis, make_reader
+
+    from .axistracks import AxisTracks, placement
+    from .cache import source_chromosome
+    from .contactview import CONTROL_EXPECTED_MODES, EXPECTED_MODES, SIGNED_MODES, ContactPanel, transform_matrix
     from .model import validate_view
     from .tracks import SignalPanel, SquareLoopOverlay
-    from .axistracks import AxisTracks, placement
     from .viewport import Viewport
-    from .contactview import ContactPanel, transform_matrix, EXPECTED_MODES, CONTROL_EXPECTED_MODES, SIGNED_MODES
-    from .cache import source_chromosome
 
     region = validate_view(view)
     viewport = Viewport.from_view(view)
@@ -115,13 +131,24 @@ def render(view, output, capture_formats=False, state=None):
                 raise ValueError("Observed and control maps use different genome assemblies")
         def extract(path, rd, x, y, norm, binsize=resolution):
             if state:
-                if view.get("tile_cache") and str(path).lower().endswith((".hic", ".cool", ".mcool")):
+                if view.get("tile_cache") and str(path).lower().endswith(
+                        (".hic", ".cool", ".mcool", ".pairs", ".pairs.gz", ".parquet")):
                     return state.tiled_rectangle(path, x, y, binsize, norm)
                 return state.rectangle(path, x, y, binsize, norm)
             if x == y:
                 return rd.matrix(source_chromosome(rd, x.chrom), x.start, x.end, binsize, norm)
-            return rd.matrix(source_chromosome(rd, y.chrom), y.start, y.end, binsize, norm,
-                             chrom2=source_chromosome(rd, x.chrom), start2=x.start, end2=x.end)
+            source_x, source_y = source_chromosome(rd, x.chrom), source_chromosome(rd, y.chrom)
+            if source_x == source_y:
+                # Readers reject chrom2 == chrom1; fetch the enclosing span
+                # once via the intra path and slice the sub-block.
+                import math
+                lo, hi = min(x.start, y.start), max(x.end, y.end)
+                block = rd.matrix(source_y, lo, hi, binsize, norm)
+                rows, cols = (y.start - lo) // binsize, (x.start - lo) // binsize
+                return block[rows:rows + math.ceil((y.end - y.start) / binsize),
+                             cols:cols + math.ceil((x.end - x.start) / binsize)]
+            return rd.matrix(source_y, y.start, y.end, binsize, norm,
+                             chrom2=source_x, start2=x.start, end2=x.end)
         matrix = extract(view["input"], reader, region, region_y, view.get("norm"))
         control_matrix = None
         if view.get("control"):
@@ -129,7 +156,7 @@ def render(view, output, capture_formats=False, state=None):
             secondary_readers.append(control_reader)
             control_matrix = extract(view["control"], control_reader, region, region_y, view.get("control_norm", view.get("norm")))
         display_mode = view.get("display_mode", "observed")
-        if display_mode in {"split", "split_oe", "oe_local", "pearson_local"} and not viewport.diagonal:
+        if display_mode in {"split", "split_oe", "oe_local", "pearson_local", "pearson", "compartment"} and not viewport.diagonal:
             raise ValueError("The selected display needs identical X and Y regions")
         from .expected import expected_matrix
         def file_expected(path, norm):
@@ -198,7 +225,7 @@ def render(view, output, capture_formats=False, state=None):
                 obj = TrackGene(**gene_data, style=track.get("style", "arrow"), maxgap=0,
                                 colour=color, cds_colour=color, **common)
             elif kind == "signal":
-                values = state.signal(path, common["chrom"], region.start, region.end, index=track.get("index")) if state else None
+                values = state.signal(path, common["chrom"], region.start, region.end, index=track.get("index")) if state else None  # type: ignore[assignment]  # optional ndarray when no state
                 obj = SignalPanel(path=path, mode=track.get("style", "fill"), color=color, values_override=values, **common)
             elif kind == "tads":
                 if square and is_overlay(track) and region.chrom != region_y.chrom:
@@ -258,7 +285,7 @@ def render(view, output, capture_formats=False, state=None):
                     from dataclasses import replace
                     y_chrom = track.get("chrom_y") or region_y.chrom
                     if kind == "signal":
-                        values = state.signal(path, y_chrom, region_y.start, region_y.end, index=track.get("index")) if state else None
+                        values = state.signal(path, y_chrom, region_y.start, region_y.end, index=track.get("index")) if state else None  # type: ignore[assignment]  # optional ndarray when no state
                         other = replace(obj, chrom=y_chrom, values_override=values)
                     elif kind == "genes" and y_chrom != common["chrom"]:
                         gene_data = {"gtf_path": "", "genes": state.records("genes", path, y_chrom)} if state else {"gtf_path": path}
@@ -279,7 +306,7 @@ def render(view, output, capture_formats=False, state=None):
         fig.axes[0].get_subplotspec().get_gridspec().update(hspace=0.24)
         panel_axes = [ax for ax in fig.axes if ax.get_label() != "<colorbar>"]
         heatmap_ax = panel_axes[0]
-        from .annotations import layers_for_view, draw_layers, feature_payload
+        from .annotations import draw_layers, feature_payload, layers_for_view
         layers = layers_for_view(view)
         draw_layers(heatmap_ax, layers, region, region_y, triangle=not square)
         heatmap_ax.patch.set_gid("contact-map-bounds")
@@ -290,9 +317,9 @@ def render(view, output, capture_formats=False, state=None):
             heatmap_ax.set_ylabel(f"{region_y.chrom} (Mb)")
             if not panel_tracks:
                 heatmap_ax.tick_params(axis="x", labelbottom=True)
-        for ax, name in zip(panel_axes[1:], labels[1:]):
+        for ax, name in zip(panel_axes[1:], labels[1:], strict=False):
             ax.set_title(name, loc="left", fontsize=8)
-        for ax, track in zip(panel_axes[1:], panel_tracks):
+        for ax, track in zip(panel_axes[1:], panel_tracks, strict=False):
             if track["kind"] == "contacts":
                 ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{value / 1e6:g}"))
                 ax.set_ylabel(f"{track.get('chrom_y') or region_y.chrom} (Mb)" if track.get("style") == "square" else "Distance (Mb)")
@@ -349,8 +376,9 @@ def main(job_path, result_path, state=None):
     try:
         job = json.loads(Path(job_path).read_text(encoding="utf-8"))
         if job["action"] == "sequence_inspect":
-            from .sequenceio import inspect_sequence
             import struct
+
+            from .sequenceio import inspect_sequence
             tracks = []
             chromsizes = job.get("chromsizes")
             for path in job["paths"]:
@@ -381,7 +409,7 @@ def main(job_path, result_path, state=None):
         elif job["action"] == "inspect":
             result = inspect_file(job["input"])
         elif job["action"] == "genome":
-            from .genome import genome_data, draw_genome
+            from .genome import draw_genome, genome_data
             meta = job["metadata"]
             data, layout, resolution = genome_data(job["input"], meta["chromsizes"], meta["resolutions"], job.get("resolution"), state)
             result = draw_genome(data, layout, resolution, job["output"], log=job.get("log", False), name=Path(job["input"]).name)
