@@ -1,0 +1,264 @@
+name: Test, build installers and publish
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+    tags: ['v[0-9]*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-22.04, target: linux-deb-x86_64, formats: deb}
+          - {os: windows-2022, target: windows-x86_64, formats: 'exe zip'}
+          - {os: macos-15, target: macos-arm64, formats: dmg}
+    defaults:
+      run:
+        working-directory: poreckit_gui
+    env:
+      QT_QPA_PLATFORM: offscreen
+      MPLBACKEND: Agg
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: poreckit_gui
+          persist-credentials: false
+      - name: Read pinned core revision
+        id: core
+        shell: bash
+        run: |
+          ref=$(tr -d '\r\n' < .github/poreckit-ref)
+          [[ "$ref" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          printf 'ref=%s\n' "$ref" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          repository: imjiaoyuan/poreckit
+          ref: ${{ steps.core.outputs.ref }}
+          token: ${{ secrets.PORECKIT_READ_TOKEN || github.token }}
+          path: poreckit
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: '0.13.7'
+          python-version: '3.12'
+          enable-cache: true
+          cache-dependency-glob: poreckit_gui/uv.lock
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Linux build and Qt platform libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl patchelf desktop-file-utils libgl1 libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libxcb-xkb1
+      - name: Windows installer compiler
+        if: runner.os == 'Windows'
+        run: choco install innosetup --yes --no-progress
+      - name: Install locked dependencies
+        run: uv sync --locked --group build
+      - name: Install test speedup plugins
+        shell: bash
+        run: |
+          uv pip install pytest-timeout
+          if [[ "$RUNNER_OS" != "macOS" ]]; then uv pip install pytest-xdist; fi
+      - name: Check release version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            uv run --no-sync python scripts/check_release_tag.py "$GITHUB_REF_NAME"
+          fi
+      - name: Test source application
+        shell: bash
+        run: |
+          args=()
+          if [[ "$RUNNER_OS" != "macOS" ]]; then args+=(-n auto); fi
+          uv run --no-sync pytest -q "${args[@]}" --timeout=300
+      - name: Optional macOS signing and notarization credentials
+        if: runner.os == 'macOS' && github.event_name != 'pull_request'
+        shell: bash
+        env:
+          CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          SIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [[ -z "$CERTIFICATE" ]]; then
+            echo "No Developer ID certificate configured; creating an ad-hoc signed build."
+            exit 0
+          fi
+          for value in "$CERT_PASSWORD" "$SIGN_IDENTITY" "$APPLE_ID" "$APPLE_PASSWORD" "$APPLE_TEAM"; do
+            [[ -n "$value" ]] || { echo "Signing requires all documented macOS secrets"; exit 1; }
+          done
+          keychain="$RUNNER_TEMP/poreckit-signing.keychain-db"
+          password=$(openssl rand -hex 24)
+          echo "::add-mask::$password"
+          printf '%s' "$CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/certificate.p12" -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain"
+          security list-keychains -d user -s "$keychain" login.keychain-db
+          xcrun notarytool store-credentials poreckit-notary --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM" --keychain "$keychain"
+          printf 'MACOS_CODESIGN_IDENTITY=%s\nMACOS_NOTARY_PROFILE=poreckit-notary\nMACOS_NOTARY_KEYCHAIN=%s\n' "$SIGN_IDENTITY" "$keychain" >> "$GITHUB_ENV"
+      - name: Optional Windows signing certificate
+        if: runner.os == 'Windows' && github.event_name != 'pull_request'
+        shell: pwsh
+        env:
+          CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if (-not $env:CERTIFICATE) { Write-Host "No signing certificate configured; building unsigned installers."; exit 0 }
+          if (-not $env:CERT_PASSWORD) { throw "WINDOWS_CERTIFICATE_PASSWORD is required" }
+          $path = Join-Path $env:RUNNER_TEMP 'poreckit-signing.pfx'
+          [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($env:CERTIFICATE))
+          $password = ConvertTo-SecureString $env:CERT_PASSWORD -AsPlainText -Force
+          $certificate = Import-PfxCertificate -FilePath $path -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          "WINDOWS_SIGN_CERT_SHA1=$($certificate.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Freeze, test packaged workers and build native installers
+        run: uv run --no-sync python scripts/build_release.py --verify-installed --format ${{ matrix.formats }}
+      - name: Install and test Debian package
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get install -y ./dist/releases/*.deb
+          env -u PYTHONPATH -u PYTHONHOME /opt/poreckit-gui/poreckit-gui --self-test "$GITHUB_WORKSPACE/poreckit_gui/dist/releases/linux-installed-selftest.json"
+          python3 -c "import json; assert json.load(open('dist/releases/linux-installed-selftest.json'))['ok']"
+      - name: Attach build outputs and self-test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: installers-${{ matrix.target }}
+          path: poreckit_gui/dist/releases/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Remove temporary signing material
+        if: always() && runner.os == 'macOS'
+        shell: bash
+        run: |
+          if [[ -f "$RUNNER_TEMP/poreckit-signing.keychain-db" ]]; then
+            security delete-keychain "$RUNNER_TEMP/poreckit-signing.keychain-db"
+          fi
+          if [[ -f "$RUNNER_TEMP/certificate.p12" ]]; then
+            rm "$RUNNER_TEMP/certificate.p12"
+          fi
+      - name: Remove Windows signing certificate
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if ($env:WINDOWS_SIGN_CERT_SHA1) { Remove-Item -LiteralPath "Cert:\CurrentUser\My\$env:WINDOWS_SIGN_CERT_SHA1" -ErrorAction SilentlyContinue }
+          Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'poreckit-signing.pfx') -ErrorAction SilentlyContinue
+
+  build-arch:
+    name: linux-arch-x86_64
+    runs-on: ubuntu-22.04
+    container: archlinux:base-devel
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+        working-directory: poreckit_gui
+    env:
+      QT_QPA_PLATFORM: offscreen
+      MPLBACKEND: Agg
+      PYTHONUTF8: '1'
+    steps:
+      - name: Prepare native Arch build environment
+        working-directory: /
+        run: |
+          pacman -Syu --noconfirm --needed base-devel git rust uv curl glib2 libglvnd libx11 libxcb libxkbcommon libxkbcommon-x11 xcb-util-cursor xcb-util-wm xcb-util-image xcb-util-keysyms xcb-util-renderutil dbus fontconfig freetype2 zlib wayland ttf-dejavu
+          useradd --create-home --uid 1001 builder
+      - uses: actions/checkout@v7
+        with:
+          path: poreckit_gui
+          persist-credentials: false
+      - name: Read pinned core revision
+        id: core
+        run: |
+          ref=$(tr -d '\r\n' < .github/poreckit-ref)
+          [[ "$ref" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          printf 'ref=%s\n' "$ref" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          repository: imjiaoyuan/poreckit
+          ref: ${{ steps.core.outputs.ref }}
+          token: ${{ secrets.PORECKIT_READ_TOKEN || github.token }}
+          path: poreckit
+          persist-credentials: false
+      - name: Give the unprivileged builder ownership of sources
+        run: chown -R builder:builder "$GITHUB_WORKSPACE/poreckit_gui" "$GITHUB_WORKSPACE/poreckit"
+      - name: Install locked dependencies as the builder
+        run: runuser -u builder -- uv sync --locked --group build --python 3.12
+      - name: Install test speedup plugins
+        run: runuser -u builder -- uv pip install pytest-xdist pytest-timeout
+      - name: Check release version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            runuser -u builder -- uv run --no-sync python scripts/check_release_tag.py "$GITHUB_REF_NAME"
+          fi
+      - name: Test source application
+        run: runuser -u builder -- uv run --no-sync pytest -q -n auto --timeout=300
+      - name: Freeze and create the native pacman package
+        run: runuser -u builder -- uv run --no-sync python scripts/build_release.py --format arch
+      - name: Install and test the Arch package
+        run: |
+          pacman -U --noconfirm ./dist/releases/*.pkg.tar.zst
+          runuser -u builder -- env -u PYTHONPATH -u PYTHONHOME /usr/bin/poreckit-gui --self-test "$GITHUB_WORKSPACE/poreckit_gui/dist/releases/arch-installed-selftest.json"
+          runuser -u builder -- uv run --no-sync python -c "import json; assert json.load(open('dist/releases/arch-installed-selftest.json'))['ok']"
+      - name: Attach Arch package and self-test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: installers-linux-arch-x86_64
+          path: poreckit_gui/dist/releases/*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    needs: [build, build-arch]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: installers-*
+          path: release
+          merge-multiple: true
+      - name: Verify checksums and publish all installers
+        working-directory: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          for checksum in *.sha256; do
+            sha256sum -c "$checksum"
+          done
+          extra=()
+          if [[ "$RELEASE_TAG" == *-* ]]; then extra+=(--prerelease); fi
+          if gh release view "$RELEASE_TAG" --json isDraft > release-state.json 2>/dev/null; then
+            python3 -c "import json; assert json.load(open('release-state.json'))['isDraft'], 'Release is already published; use a new version tag'"
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --generate-notes --draft "${extra[@]}"
+          fi
+          rm -f release-state.json
+          gh release upload "$RELEASE_TAG" ./* --clobber
+          gh release edit "$RELEASE_TAG" --draft=false "${extra[@]}"

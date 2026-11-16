@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+.pytest_cache/
+build/
+dist/
+*.egg-info/
+output/
+packaging/poreckit.png
+packaging/poreckit.ico
+packaging/poreckit.icns
+.codexhome/
+.codexhome/
+codex_review.log
+.ci_deploy_key*
+monorepo/

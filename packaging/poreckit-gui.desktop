@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=poreckit GUI
+Comment=Hi-C and Pore-C contact map browser
+Exec=poreckit-gui
+Icon=poreckit-gui
+Terminal=false
+Categories=Science;Biology;Education;

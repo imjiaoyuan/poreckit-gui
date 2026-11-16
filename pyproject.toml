@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "poreckit-gui"
+version = "0.1.0"
+description = "A native Qt workbench for Hi-C and Pore-C analysis"
+requires-python = ">=3.11"
+dependencies = ["PySide6-Essentials>=6.8,<7", "poreckit"]
+
+[project.scripts]
+poreckit-gui = "poreckit_gui.app:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "pyyaml>=6,<7"]
+build = ["pyinstaller>=6.16,<7"]
+
+[tool.uv.sources]
+poreckit = { path = "../poreckit" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

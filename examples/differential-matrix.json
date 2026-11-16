@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "entry": "api:poreckit.diffstat:plot_differential_matrix",
+  "values": {
+    "m1": {"$array": [[10, 5, 2, 1], [5, 10, 4, 2], [2, 4, 10, 5], [1, 2, 5, 10]]},
+    "m2": {"$array": [[10, 2, 2, 1], [2, 10, 8, 2], [2, 8, 10, 2], [1, 2, 2, 10]]},
+    "title": "Synthetic example - no biological interpretation"
+  },
+  "tracks": [],
+  "cwd": ".",
+  "locus": "chr1:0-2,000,000"
+}

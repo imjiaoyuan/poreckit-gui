@@ -1,0 +1,24 @@
+# Repackage the locally frozen application. No system Python is needed at runtime.
+pkgname=poreckit-gui
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc='Native Hi-C and Pore-C contact map browser'
+arch=('@ARCH@')
+url='https://github.com/imjiaoyuan/poreckit'
+license=('custom')
+depends=('glibc>=@GLIBC@' 'glib2' 'libglvnd' 'libx11' 'libxcb'
+         'libxkbcommon' 'libxkbcommon-x11' 'xcb-util-cursor' 'xcb-util-wm'
+         'xcb-util-image' 'xcb-util-keysyms' 'xcb-util-renderutil'
+         'dbus' 'fontconfig' 'freetype2' 'zlib' 'wayland')
+# Stripping the frozen executable can damage its embedded Python archive.
+options=('!strip' '!debug' '!lto' '!purge')
+source=('poreckit-gui.tar' 'poreckit-gui.desktop' 'poreckit.svg')
+sha256sums=('@BUNDLE_SHA256@' '@DESKTOP_SHA256@' '@ICON_SHA256@')
+
+package() {
+    install -d "$pkgdir/usr/lib" "$pkgdir/usr/bin"
+    cp -a --no-preserve=ownership "$srcdir/poreckit-gui" "$pkgdir/usr/lib/poreckit-gui"
+    ln -s ../lib/poreckit-gui/poreckit-gui "$pkgdir/usr/bin/poreckit-gui"
+    install -Dm644 "$srcdir/poreckit-gui.desktop" "$pkgdir/usr/share/applications/poreckit-gui.desktop"
+    install -Dm644 "$srcdir/poreckit.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/poreckit-gui.svg"
+}
